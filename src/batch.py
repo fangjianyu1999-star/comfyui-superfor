@@ -1,0 +1,483 @@
+"""
+批量处理节点（本地文件夹 → 修复工作流 → 按原结构保存）
+=====================================================
+
+解决场景：
+    桌面有一个根文件夹（例如 `图像a`），里面又套了多个子文件夹
+    （`文件1`、`文件2`、`文件3` ...），每个子文件夹里有很多图。
+    希望把它们逐张送进修复（API）工作流，结果保存到下载目录，
+    并且**保留子目录结构和原文件名**。
+
+ComfyUI 的执行模型是「一次队列跑一遍图」，而 API 修复节点一次只处理一张、
+且每张图尺寸可能不同（无法堆成同一个 batch 张量）。因此批量的正确做法是：
+
+    [批量遍历加载] --image--> [修复 API 节点] --image--> [按路径保存]
+          |  filename / relative_dir                         ^
+          +--------------------------------------------------+
+
+加载器每次队列执行「自动取下一张」，配合 ComfyUI 的 Auto Queue / 队列 N 次，
+即可把整个文件夹跑完；保存器按加载器给出的相对子目录 + 原文件名落盘。
+
+两个节点：
+- LoadImageBatchV3   aiaiartist 批量遍历加载（递归扫描，逐张输出 + 路径信息）
+- SaveImageToDirV3   aiaiartist 按路径保存（保留子目录结构与原文件名）
+"""
+from __future__ import annotations
+
+import logging
+import os
+from typing import Any
+
+import torch
+from PIL import Image
+
+from .utils import (
+    comfy_tensor_to_pil_list,
+    make_error_image,
+    pil_to_comfy_tensor,
+    pretty_error,
+)
+
+log = logging.getLogger("comfyui-superfor")
+
+CATEGORY_BATCH = "🔁 SuperFor/批量"
+
+# 支持的图片扩展名（小写，含点）
+IMAGE_EXTS: tuple[str, ...] = (
+    ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif",
+)
+
+MODE_INCREMENTAL = "逐张(incremental)"
+MODE_SINGLE = "指定序号(single)"
+
+SORT_NAME = "按路径名"
+SORT_MTIME = "按修改时间"
+
+# 加载器游标状态：缓存键 -> {"start": 起始序号, "cursor": 下一张序号}
+# 改变 start_index 会自动重置游标，方便重新从头跑。
+_CURSORS: dict[str, dict[str, int]] = {}
+
+
+def _expand_dir(directory: str) -> str:
+    """把用户输入的目录展开成绝对路径（支持 ~ 和环境变量）。"""
+    d = (directory or "").strip().strip('"').strip("'")
+    return os.path.abspath(os.path.expanduser(os.path.expandvars(d)))
+
+
+def _scan_images(root: str, include_subdir: bool, keyword: str, sort_mode: str) -> list[str]:
+    """扫描根目录下所有图片，返回绝对路径列表（已排序）。"""
+    keyword = (keyword or "").strip().lower()
+    files: list[str] = []
+
+    if include_subdir:
+        for dirpath, _dirnames, names in os.walk(root):
+            for name in names:
+                if os.path.splitext(name)[1].lower() in IMAGE_EXTS:
+                    files.append(os.path.join(dirpath, name))
+    else:
+        try:
+            for name in os.listdir(root):
+                full = os.path.join(root, name)
+                if os.path.isfile(full) and os.path.splitext(name)[1].lower() in IMAGE_EXTS:
+                    files.append(full)
+        except FileNotFoundError:
+            return []
+
+    if keyword:
+        files = [f for f in files if keyword in os.path.basename(f).lower()]
+
+    if sort_mode == SORT_MTIME:
+        files.sort(key=lambda p: (os.path.getmtime(p), p.lower()))
+    else:
+        # 按相对路径名排序，保证「文件1、文件2、文件3」这种顺序稳定
+        files.sort(key=lambda p: p.lower())
+
+    return files
+
+
+def _load_pil(path: str) -> Image.Image:
+    """读取图片并做 EXIF 方向校正。"""
+    img = Image.open(path)
+    try:
+        from PIL import ImageOps
+
+        img = ImageOps.exif_transpose(img)
+    except Exception:  # noqa: BLE001
+        pass
+    return img
+
+
+try:
+    from comfy_api.latest import io, ui
+
+    _HAS_V3 = True
+except ImportError:  # pragma: no cover
+    _HAS_V3 = False
+
+
+def get_batch_v3_nodes() -> list[type]:
+    """返回本模块的 V3 节点类列表（供 nodes.py 汇总注册）。"""
+    if not _HAS_V3:
+        return []
+    return [LoadImageBatchV3, SaveImageToDirV3, CountImagesInDirV3]
+
+
+if _HAS_V3:
+
+    class LoadImageBatchV3(io.ComfyNode):
+        """aiaiartist 批量遍历加载
+
+        递归扫描一个根文件夹（可含多层子文件夹）里的所有图片，
+        每次队列执行输出「下一张」图，并同时给出它的文件名、相对子目录、
+        相对路径等信息，方便后续保存时保留原始目录结构。
+        """
+
+        @classmethod
+        def define_schema(cls) -> io.Schema:
+            return io.Schema(
+                node_id="Aiaiartist_LoadImageBatch",
+                display_name="📥 批量遍历加载",
+                category=CATEGORY_BATCH,
+                description=(
+                    "递归扫描文件夹里的所有图片，逐张送入工作流。\n"
+                    "用法：「加载模式」选「逐张」，把本节点 🖼️图像 接修复节点，\n"
+                    "📝文件名 / 📂相对子目录 接「按路径保存」节点；\n"
+                    "然后开启 ComfyUI 的 Auto Queue（或队列 N 次），即可跑完整个文件夹。"
+                ),
+                inputs=[
+                    io.String.Input(
+                        "directory",
+                        display_name="📁 文件夹路径",
+                        default="",
+                        tooltip="根文件夹路径，支持 ~ 和子文件夹，例如 ~/Desktop/图像a",
+                    ),
+                    io.Combo.Input(
+                        "mode",
+                        display_name="🔁 加载模式",
+                        options=[MODE_INCREMENTAL, MODE_SINGLE],
+                        default=MODE_INCREMENTAL,
+                        tooltip="逐张：每次队列自动取下一张（批量用）；指定序号：固定取第 N 张（调试用）",
+                    ),
+                    io.Int.Input(
+                        "index",
+                        display_name="🔢 序号 / 起始",
+                        default=0,
+                        min=0,
+                        max=999999,
+                        tooltip="逐张模式：起始序号（改它会从该序号重新开始）；指定序号模式：取第几张",
+                    ),
+                    io.Boolean.Input(
+                        "include_subdir",
+                        display_name="📂 含子文件夹",
+                        default=True,
+                        tooltip="是否递归扫描子文件夹（图像a 里套的 文件1/文件2/...）",
+                    ),
+                    io.Combo.Input(
+                        "sort",
+                        display_name="↕️ 排序方式",
+                        options=[SORT_NAME, SORT_MTIME],
+                        default=SORT_NAME,
+                        tooltip="遍历顺序",
+                    ),
+                    io.String.Input(
+                        "filter_keyword",
+                        display_name="🔍 文件名筛选",
+                        default="",
+                        optional=True,
+                        tooltip="只加载文件名包含该关键字的图片，可留空",
+                    ),
+                ],
+                outputs=[
+                    io.Image.Output(display_name="🖼️ 图像"),
+                    io.String.Output(display_name="📝 文件名"),        # 不含扩展名
+                    io.String.Output(display_name="📂 相对子目录"),    # 相对根目录的子目录
+                    io.String.Output(display_name="📄 相对路径"),      # 子目录/原文件名.ext
+                    io.String.Output(display_name="🗂️ 源完整路径"),    # 源文件绝对路径
+                    io.Int.Output(display_name="🔢 当前序号"),
+                    io.Int.Output(display_name="🔢 图片总数"),
+                ],
+            )
+
+        @classmethod
+        def fingerprint_inputs(cls, directory, mode, index, include_subdir, sort, filter_keyword="") -> Any:
+            """逐张模式每次都重新执行（自动前进）；指定序号模式按输入决定。"""
+            if mode == MODE_INCREMENTAL:
+                return float("nan")  # nan != nan → 每次队列都重新执行，从而前进一张
+            return f"{_expand_dir(directory)}|{include_subdir}|{sort}|{filter_keyword}|{index}"
+
+        @classmethod
+        def execute(cls, directory, mode, index, include_subdir, sort, filter_keyword=""):
+            try:
+                root = _expand_dir(directory)
+                if not directory.strip():
+                    return io.NodeOutput(
+                        make_error_image("请填写 directory（要批量加载的文件夹路径）"),
+                        "", "", "", "", 0, 0,
+                    )
+                if not os.path.isdir(root):
+                    return io.NodeOutput(
+                        make_error_image(f"目录不存在：\n{root}"),
+                        "", "", "", "", 0, 0,
+                    )
+
+                files = _scan_images(root, include_subdir, filter_keyword, sort)
+                total = len(files)
+                if total == 0:
+                    return io.NodeOutput(
+                        make_error_image(f"目录里没找到图片：\n{root}\n（扩展名支持 {'/'.join(IMAGE_EXTS)}）"),
+                        "", "", "", "", 0, 0,
+                    )
+
+                if mode == MODE_SINGLE:
+                    cur = max(0, min(index, total - 1))
+                else:
+                    key = f"{root}|{include_subdir}|{sort}|{filter_keyword.strip().lower()}"
+                    state = _CURSORS.get(key)
+                    if state is None or state["start"] != index:
+                        state = {"start": index, "cursor": index}
+                        _CURSORS[key] = state
+                    cur = state["cursor"] % total
+                    state["cursor"] = cur + 1  # 下一次取下一张（到末尾自动绕回）
+
+                src = files[cur]
+                pil = _load_pil(src)
+                tensor = pil_to_comfy_tensor(pil)
+
+                rel_path = os.path.relpath(src, root)
+                rel_dir = os.path.dirname(rel_path)
+                filename = os.path.splitext(os.path.basename(src))[0]
+
+                log.info(
+                    "[Aiaiartist_LoadImageBatch] %d/%d -> %s",
+                    cur + 1, total, rel_path,
+                )
+
+                return io.NodeOutput(
+                    tensor,
+                    filename,
+                    rel_dir,
+                    rel_path,
+                    src,
+                    cur,
+                    total,
+                )
+            except Exception as e:  # noqa: BLE001
+                log.exception("[Aiaiartist_LoadImageBatch] 失败")
+                return io.NodeOutput(
+                    make_error_image(pretty_error("批量加载失败", e)),
+                    "", "", "", "", 0, 0,
+                )
+
+    class CountImagesInDirV3(io.ComfyNode):
+        """aiaiartist 目录图片计数
+
+        统计一个文件夹（可含子文件夹）里有多少张图片，输出 INT 数量。
+        专门用来喂给 easy-use「For循环-开始」的 total（总量），
+        这样循环次数就会自动等于图片总数，不用手动数。
+
+        注意：参数要和「批量遍历加载」保持一致（同一个 directory / include_subdir /
+        filter_keyword），算出来的总数才和加载顺序对得上。
+        """
+
+        @classmethod
+        def define_schema(cls) -> io.Schema:
+            return io.Schema(
+                node_id="Aiaiartist_CountImagesInDir",
+                display_name="🔢 目录图片计数",
+                category=CATEGORY_BATCH,
+                description=(
+                    "统计文件夹里图片总数（可含子文件夹），输出整数。\n"
+                    "接到 easy-use「For循环-开始」的 total，循环次数自动 = 图片数。\n"
+                    "参数务必和「批量遍历加载」一致。"
+                ),
+                inputs=[
+                    io.String.Input(
+                        "directory",
+                        display_name="📁 文件夹路径",
+                        default="",
+                        tooltip="要统计的文件夹路径，需与「批量遍历加载」的文件夹路径相同",
+                    ),
+                    io.Boolean.Input(
+                        "include_subdir",
+                        display_name="📂 含子文件夹",
+                        default=True,
+                        tooltip="是否递归子文件夹（与加载器保持一致）",
+                    ),
+                    io.String.Input(
+                        "filter_keyword",
+                        display_name="🔍 文件名筛选",
+                        default="",
+                        optional=True,
+                        tooltip="只统计文件名含该关键字的图片（与加载器保持一致）",
+                    ),
+                ],
+                outputs=[
+                    io.Int.Output(display_name="🔢 图片总数"),
+                ],
+            )
+
+        @classmethod
+        def execute(cls, directory, include_subdir=True, filter_keyword=""):
+            root = _expand_dir(directory)
+            if not os.path.isdir(root):
+                log.warning("[Aiaiartist_CountImagesInDir] 目录不存在：%s", root)
+                return io.NodeOutput(0)
+            total = len(_scan_images(root, include_subdir, filter_keyword, SORT_NAME))
+            log.info("[Aiaiartist_CountImagesInDir] %s 共 %d 张", root, total)
+            return io.NodeOutput(total)
+
+    class SaveImageToDirV3(io.ComfyNode):
+        """aiaiartist 按路径保存
+
+        把图像保存到「输出根目录 / 相对子目录 / 文件名.扩展名」，
+        自动创建目录、保留子目录结构与原文件名。
+        通常 relative_dir 和 filename 直接接「批量遍历加载」节点的同名输出。
+        """
+
+        @classmethod
+        def define_schema(cls) -> io.Schema:
+            return io.Schema(
+                node_id="Aiaiartist_SaveImageToDir",
+                display_name="💾 按路径保存",
+                category=CATEGORY_BATCH,
+                description=(
+                    "把结果保存到指定根目录，保留子目录结构和原文件名。\n"
+                    "把 📂相对子目录 / 📝文件名 接到「批量遍历加载」的同名输出即可。\n"
+                    "最终路径 = 保存根目录 / 相对子目录 / 前缀+文件名+后缀.扩展名"
+                ),
+                inputs=[
+                    io.Image.Input(
+                        "images",
+                        display_name="🖼️ 图像",
+                        tooltip="要保存的图像（接修复节点输出）",
+                    ),
+                    io.String.Input(
+                        "output_root",
+                        display_name="📁 保存根目录",
+                        default="",
+                        tooltip="保存的根目录，例如 ~/Downloads/修复结果",
+                    ),
+                    io.String.Input(
+                        "relative_dir",
+                        display_name="📂 相对子目录",
+                        default="",
+                        optional=True,
+                        tooltip="相对子目录（接加载器的 📂相对子目录，保留原结构），可留空",
+                    ),
+                    io.String.Input(
+                        "filename",
+                        display_name="📝 文件名",
+                        default="",
+                        optional=True,
+                        tooltip="文件名（不含扩展名，接加载器的 📝文件名）；留空则用时间戳",
+                    ),
+                    io.String.Input(
+                        "filename_prefix",
+                        display_name="🏷️ 文件名前缀",
+                        default="",
+                        optional=True,
+                        tooltip="文件名前缀，可留空",
+                    ),
+                    io.String.Input(
+                        "filename_suffix",
+                        display_name="🏷️ 文件名后缀",
+                        default="",
+                        optional=True,
+                        tooltip="文件名后缀，例如 _修复，可留空",
+                    ),
+                    io.Combo.Input(
+                        "image_format",
+                        display_name="🖼️ 保存格式",
+                        options=["png", "jpg", "webp"],
+                        default="png",
+                        tooltip="保存格式",
+                    ),
+                    io.Int.Input(
+                        "quality",
+                        display_name="✨ 图片质量",
+                        default=95,
+                        min=1,
+                        max=100,
+                        tooltip="jpg/webp 的质量（png 忽略）",
+                    ),
+                    io.Boolean.Input(
+                        "overwrite",
+                        display_name="♻️ 覆盖同名",
+                        default=False,
+                        tooltip="同名文件是否覆盖；关闭时自动加 _1 _2 ... 避免覆盖",
+                    ),
+                ],
+                outputs=[
+                    io.String.Output(display_name="💾 已保存路径"),
+                ],
+                is_output_node=True,
+            )
+
+        @classmethod
+        def execute(cls, images, output_root, relative_dir="", filename="",
+                    filename_prefix="", filename_suffix="", image_format="png",
+                    quality=95, overwrite=False):
+            try:
+                if not (output_root or "").strip():
+                    raise ValueError("请填写 output_root（保存的根目录），例如 ~/Downloads/修复结果")
+
+                root = _expand_dir(output_root)
+                # 防止 relative_dir 里的绝对路径 / .. 越权写到根目录之外
+                rel = (relative_dir or "").strip().strip("/\\")
+                target_dir = os.path.normpath(os.path.join(root, rel))
+                if os.path.commonpath([root, target_dir]) != root:
+                    log.warning("[Aiaiartist_SaveImageToDir] relative_dir 越权，已忽略：%s", relative_dir)
+                    target_dir = root
+                os.makedirs(target_dir, exist_ok=True)
+
+                ext = {"png": ".png", "jpg": ".jpg", "webp": ".webp"}[image_format]
+                base_name = (filename or "").strip()
+                if not base_name:
+                    import time
+
+                    base_name = time.strftime("%Y%m%d_%H%M%S")
+
+                pil_list = comfy_tensor_to_pil_list(images)
+                batch_n = len(pil_list)
+                saved: list[str] = []
+
+                for i, pil in enumerate(pil_list):
+                    name = f"{filename_prefix}{base_name}{filename_suffix}"
+                    if batch_n > 1:
+                        name = f"{name}_{i:02d}"
+
+                    out_path = os.path.join(target_dir, name + ext)
+                    if not overwrite:
+                        out_path = cls._dedupe(out_path)
+
+                    save_img = pil
+                    if image_format == "jpg" and save_img.mode != "RGB":
+                        save_img = save_img.convert("RGB")
+
+                    if image_format == "png":
+                        save_img.save(out_path, format="PNG", compress_level=4)
+                    elif image_format == "jpg":
+                        save_img.save(out_path, format="JPEG", quality=quality)
+                    else:  # webp
+                        save_img.save(out_path, format="WEBP", quality=quality)
+
+                    saved.append(out_path)
+                    log.info("[Aiaiartist_SaveImageToDir] 已保存 %s", out_path)
+
+                result = "\n".join(saved)
+                return io.NodeOutput(result, ui=ui.PreviewImage(images, cls=cls))
+            except Exception as e:  # noqa: BLE001
+                log.exception("[Aiaiartist_SaveImageToDir] 失败")
+                msg = pretty_error("保存失败", e)
+                return io.NodeOutput(msg, ui=ui.PreviewText(msg))
+
+        @staticmethod
+        def _dedupe(path: str) -> str:
+            """文件已存在时，自动追加 _1 _2 ... 直到不冲突。"""
+            if not os.path.exists(path):
+                return path
+            stem, ext = os.path.splitext(path)
+            i = 1
+            while os.path.exists(f"{stem}_{i}{ext}"):
+                i += 1
+            return f"{stem}_{i}{ext}"

@@ -1,0 +1,6 @@
+# comfyui-superfor 依赖
+# 核心依赖（torch / numpy / Pillow）由 ComfyUI 本体提供，无需重复安装。
+# 运行时还需安装 comfyui-easy-use（提供底层 whileLoop / mathInt / compare 节点）：
+#   https://github.com/yolain/ComfyUI-Easy-Use
+Pillow
+numpy

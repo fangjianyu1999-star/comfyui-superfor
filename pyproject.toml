@@ -1,0 +1,18 @@
+[project]
+name = "comfyui-superfor"
+version = "0.1.0"
+description = "ComfyUI 批处理节点：递归遍历文件夹、按原目录结构保存、自动计数 for 循环"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "Pillow>=10.0.0",
+    "numpy",
+]
+
+[project.urls]
+Repository = "https://github.com/fangjianyu1999-star/comfyui-superfor"
+
+[tool.comfy]
+PublisherId = "fangjianyu1999-star"
+DisplayName = "SuperFor 批处理循环"
+Icon = ""
