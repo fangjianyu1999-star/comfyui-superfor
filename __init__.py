@@ -56,6 +56,14 @@ try:
     if _LOOP_NCM:
         _comfy_nodes.NODE_CLASS_MAPPINGS.update(_LOOP_NCM)
         _comfy_nodes.NODE_DISPLAY_NAME_MAPPINGS.update(_LOOP_NDM)
-        log.info("[comfyui-superfor] 已注册 %d 个批量循环节点（V1）", len(_LOOP_NCM))
+        # 关键：手动补上「节点包归属」。ComfyUI 的 load_custom_node 会给正常登记的节点设置
+        # RELATIVE_PYTHON_MODULE，前端侧栏「节点库」按它分组；手动注入的节点缺这个属性，
+        # 会导致侧栏树里不显示（但仍能被搜索命中）。这里补上，和批量 V3 节点归到同一个包。
+        import os as _os
+        _base = _os.path.basename(__name__.replace("\\", "/").rstrip("/")) or "comfyui-superfor"
+        _pkg = "custom_nodes.%s" % _base
+        for _cls in _LOOP_NCM.values():
+            _cls.RELATIVE_PYTHON_MODULE = _pkg
+        log.info("[comfyui-superfor] 已注册 %d 个批量循环节点（V1，归属 %s）", len(_LOOP_NCM), _pkg)
 except Exception as e:  # noqa: BLE001
     log.exception("[comfyui-superfor] 批量循环节点注册失败：%s", e)
