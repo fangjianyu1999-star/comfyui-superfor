@@ -164,6 +164,7 @@ if _HAS_V3:
                 node_id="SuperFor_LoadImageBatch",
                 display_name="批量遍历加载",
                 category=CATEGORY_BATCH,
+                not_idempotent=True,
                 description=(
                     "递归扫描文件夹里的所有图片，逐张送入工作流。\n"
                     "用法：「加载模式」选「逐张」，把本节点 🖼️图像 接修复节点，\n"
@@ -226,9 +227,9 @@ if _HAS_V3:
 
         @classmethod
         def fingerprint_inputs(cls, directory, mode, index, include_subdir, sort, filter_keyword="") -> Any:
-            """逐张模式每次都重新执行（自动前进）；指定序号模式按输入决定。"""
-            if mode == MODE_INCREMENTAL:
-                return float("nan")  # nan != nan → 每次队列都重新执行，从而前进一张
+            """逐张 / 指定序号在循环体内都必须每轮重新执行（序号来自连线时首轮会被冻结）。"""
+            if mode in (MODE_INCREMENTAL, MODE_SINGLE):
+                return float("nan")
             return f"{_expand_dir(directory)}|{include_subdir}|{sort}|{filter_keyword}|{index}"
 
         @classmethod
@@ -274,7 +275,7 @@ if _HAS_V3:
                 filename = os.path.splitext(os.path.basename(src))[0]
 
                 log.info(
-                    "[Aiaiartist_LoadImageBatch] %d/%d -> %s",
+                    "[SuperFor_LoadImageBatch] %d/%d -> %s",
                     cur + 1, total, rel_path,
                 )
 

@@ -266,10 +266,6 @@ class DirForLoopEnd:
     # 关键：标记为输出节点，否则 GUI 点「运行」时本节点不会被执行，循环不会展开（只跑一次）
     OUTPUT_NODE = True
 
-    @classmethod
-    def IS_CHANGED(cls, **kwargs):
-        return float("nan")
-
     def end(self, dynprompt=None, extra_pnginfo=None, unique_id=None, **kwargs):
         flow = _pick(kwargs, "循环流程", "flow", "🔁 循环流程")
         anchor = _pick(kwargs, "循环体回接", "loop_anchor", "🔗 循环体回接", "initial_value1", default=None)
