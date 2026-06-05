@@ -121,6 +121,26 @@ def _scan_images(root: str, include_subdir: bool, keyword: str, sort_mode: str) 
     return files
 
 
+def directory_signature(
+    directory: str,
+    include_subdir: bool,
+    filter_keyword: str,
+    sort: str,
+) -> str:
+    """源目录指纹：换文件夹、增删图、改排序/筛选时自动变。"""
+    root = _expand_dir(directory)
+    if not os.path.isdir(root):
+        return f"invalid|{root}"
+    sub = include_subdir if isinstance(include_subdir, bool) else True
+    kw = filter_keyword if isinstance(filter_keyword, str) else ""
+    sm = sort if sort in (SORT_NAME, SORT_MTIME) else SORT_NAME
+    files = _scan_images(root, sub, kw, sm)
+    if not files:
+        return f"empty|{root}|{sm}"
+    latest_mtime = max(os.path.getmtime(f) for f in files)
+    return f"{root}|{len(files)}|{latest_mtime:.6f}|{sm}|{sub}|{kw.strip().lower()}"
+
+
 def _load_pil(path: str) -> Image.Image:
     """读取图片并做 EXIF 方向校正。"""
     img = Image.open(path)
@@ -468,8 +488,8 @@ if _HAS_V3:
             quality=95,
             overwrite=False,
         ) -> Any:
-            # 保存节点必须每轮真正写盘；否则跨队列重跑会 0.00 秒跳过
-            return float("nan")
+            # 换保存目录会自动重跑；循环体内每轮仍靠上游图像变化 + nan 写盘
+            return (_expand_dir(output_root), filename, relative_dir, filename_suffix, float("nan"))
 
         @classmethod
         def execute(cls, images, output_root, relative_dir="", filename="",
@@ -646,15 +666,6 @@ if _HAS_V3:
                         display_name="覆盖同名",
                         default=True,
                     ),
-                    io.Int.Input(
-                        "run_batch",
-                        display_name="运行批次",
-                        default=0,
-                        min=0,
-                        max=999999,
-                        optional=True,
-                        tooltip="同一文件夹想再跑一遍时 +1，避免 ComfyUI 缓存导致 0.00 秒秒完成",
-                    ),
                 ],
                 outputs=[
                     io.String.Output(display_name="导出摘要"),
@@ -676,9 +687,9 @@ if _HAS_V3:
             image_format="png",
             quality=95,
             overwrite=True,
-            run_batch=0,
         ) -> Any:
-            return f"{_expand_dir(directory)}|{output_root}|{run_batch}"
+            sig = directory_signature(directory, include_subdir, filter_keyword, sort)
+            return f"{sig}|{_expand_dir(output_root)}|{max_side}|{filename_suffix}"
 
         @classmethod
         def execute(
@@ -693,7 +704,6 @@ if _HAS_V3:
             image_format="png",
             quality=95,
             overwrite=True,
-            run_batch=0,
         ):
             root = _expand_dir(directory)
             out_root = _expand_dir(output_root)
