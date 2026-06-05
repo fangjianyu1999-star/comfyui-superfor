@@ -630,6 +630,15 @@ if _HAS_V3:
                         display_name="覆盖同名",
                         default=True,
                     ),
+                    io.Int.Input(
+                        "run_batch",
+                        display_name="运行批次",
+                        default=0,
+                        min=0,
+                        max=999999,
+                        optional=True,
+                        tooltip="同一文件夹想再跑一遍时 +1，避免 ComfyUI 缓存导致 0.00 秒秒完成",
+                    ),
                 ],
                 outputs=[
                     io.String.Output(display_name="导出摘要"),
@@ -637,6 +646,23 @@ if _HAS_V3:
                 ],
                 is_output_node=True,
             )
+
+        @classmethod
+        def fingerprint_inputs(
+            cls,
+            directory,
+            output_root,
+            include_subdir=True,
+            sort=SORT_NAME,
+            filter_keyword="",
+            max_side=0,
+            filename_suffix="",
+            image_format="png",
+            quality=95,
+            overwrite=True,
+            run_batch=0,
+        ) -> Any:
+            return f"{_expand_dir(directory)}|{output_root}|{run_batch}"
 
         @classmethod
         def execute(
@@ -651,6 +677,7 @@ if _HAS_V3:
             image_format="png",
             quality=95,
             overwrite=True,
+            run_batch=0,
         ):
             root = _expand_dir(directory)
             out_root = _expand_dir(output_root)

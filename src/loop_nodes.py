@@ -172,6 +172,15 @@ class DirForLoopStart:
             },
             "optional": {
                 "文件名筛选": ("STRING", {"default": "", "tooltip": "只加载文件名含该关键字的图片，可留空"}),
+                "运行批次": (
+                    "INT",
+                    {
+                        "default": 0,
+                        "min": 0,
+                        "max": 999999,
+                        "tooltip": "同一文件夹想再跑一遍时改为 1、2、3…（用于清除 ComfyUI 缓存，否则会 0.00 秒秒完成）",
+                    },
+                ),
             },
             "hidden": {
                 "initial_value0": (any_type,),
@@ -188,7 +197,11 @@ class DirForLoopStart:
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
-        return _loop_index_changed(**kwargs)
+        try:
+            run_batch = int(_pick(kwargs, "运行批次", "run_batch", default=0) or 0)
+        except (TypeError, ValueError):
+            run_batch = 0
+        return (run_batch, _loop_index_changed(**kwargs))
 
     def start(self, **kwargs):
         directory = _pick(kwargs, "文件夹路径", "directory", "📁 文件夹路径", default="")

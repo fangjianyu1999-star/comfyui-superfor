@@ -205,7 +205,7 @@ def build_dir_loop() -> dict:
     start = wf.add(
         "SuperFor_DirForLoopStart", (40, 60), (320, 200),
         title="① 批量循环-开始（自动计数）",
-        widgets=[SRC_DIR, True, "按路径名", ""],
+        widgets=[SRC_DIR, True, "按路径名", "", 0],  # 最后一项：运行批次，重跑时 +1
         inputs=[],
         outputs=[
             out("循环流程", LINK_TYPE_FLOW),
@@ -315,7 +315,7 @@ def build_batch_export() -> dict:
     wf.add(
         "SuperFor_BatchFolderExport", (40, 60), (360, 340),
         title="文件夹批量导出（推荐：缩放/复制用这个）",
-        widgets=[SRC_DIR, OUT_DIR, True, "name", "", 0, "_修复", "png", 95, True],
+        widgets=[SRC_DIR, OUT_DIR, True, "name", "", 0, "_修复", "png", 95, True, 0],
         inputs=[],
         outputs=[
             out("summary", LINK_TYPE_STRING),
