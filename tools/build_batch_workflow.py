@@ -126,8 +126,8 @@ PREVIEW_SCALE_WIDGETS = ["lanczos", 1280, 0, "disabled"]
 def loader_outputs() -> list[dict]:
     return [
         out("image", LINK_TYPE_IMAGE),
-        out("filename", LINK_TYPE_STRING),
         out("relative_dir", LINK_TYPE_STRING),
+        out("filename", LINK_TYPE_STRING),
         out("relative_path", LINK_TYPE_STRING),
         out("source_path", LINK_TYPE_STRING),
         out("current_index", LINK_TYPE_INT),
@@ -190,8 +190,8 @@ def build_for_loop() -> dict:
     wf.link(for_start, 1, loader, 0, LINK_TYPE_INT)        # 索引 → 加载器.index
     wf.link(loader, 0, i2i, 0, LINK_TYPE_IMAGE)            # image → 修复
     wf.link(i2i, 0, saver, 0, LINK_TYPE_IMAGE)             # 修复 → 保存.images
-    wf.link(loader, 2, saver, 1, LINK_TYPE_STRING)         # relative_dir
-    wf.link(loader, 1, saver, 2, LINK_TYPE_STRING)         # filename
+    wf.link(loader, 1, saver, 1, LINK_TYPE_STRING)         # relative_dir
+    wf.link(loader, 2, saver, 2, LINK_TYPE_STRING)         # filename
     wf.link(saver, 0, for_end, 1, LINK_TYPE_STRING)        # saved_paths → 循环结束 初始值1（关键）
     wf.link(for_start, 0, for_end, 0, LINK_TYPE_FLOW)      # flow
 
@@ -211,8 +211,8 @@ def build_dir_loop() -> dict:
             out("循环流程", LINK_TYPE_FLOW),
             out("当前序号", LINK_TYPE_INT),
             out("图像", LINK_TYPE_IMAGE),
-            out("文件名", LINK_TYPE_STRING),
             out("相对子目录", LINK_TYPE_STRING),
+            out("文件名", LINK_TYPE_STRING),
             out("相对路径", LINK_TYPE_STRING),
             out("图片总数", LINK_TYPE_INT),
         ],
@@ -262,8 +262,8 @@ def build_dir_loop() -> dict:
     wf.link(start, 0, end, 0, LINK_TYPE_FLOW)          # 循环流程 → 结束
     wf.link(start, 2, i2i, 0, LINK_TYPE_IMAGE)         # 图像 → 修复（直接接开始，勿经加载器）
     wf.link(i2i, 0, saver, 0, LINK_TYPE_IMAGE)          # 修复 → 保存
-    wf.link(start, 4, saver, 1, LINK_TYPE_STRING)       # 相对子目录
-    wf.link(start, 3, saver, 2, LINK_TYPE_STRING)       # 文件名
+    wf.link(start, 3, saver, 1, LINK_TYPE_STRING)       # 相对子目录 → 保存.relative_dir
+    wf.link(start, 4, saver, 2, LINK_TYPE_STRING)       # 文件名 → 保存.filename
     wf.link(saver, 0, end, 1, LINK_TYPE_STRING)          # 已保存路径 → 循环体回接（关键）
     wf.link(end, 0, sink, 0, LINK_TYPE_STRING)           # 循环完成 → 完成出口（关键）
 
@@ -303,8 +303,8 @@ def build_auto_queue() -> dict:
 
     wf.link(loader, 0, i2i, 0, LINK_TYPE_IMAGE)
     wf.link(i2i, 0, saver, 0, LINK_TYPE_IMAGE)
-    wf.link(loader, 2, saver, 1, LINK_TYPE_STRING)
-    wf.link(loader, 1, saver, 2, LINK_TYPE_STRING)
+    wf.link(loader, 1, saver, 1, LINK_TYPE_STRING)
+    wf.link(loader, 2, saver, 2, LINK_TYPE_STRING)
 
     return wf.dump()
 

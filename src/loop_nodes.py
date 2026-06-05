@@ -169,7 +169,8 @@ class DirForLoopStart:
     """SuperFor 批量循环-开始（自动递归计数）
 
     指定文件夹后自动统计图片总数并驱动 for 循环。
-    循环体内请直接把「图像 / 文件名 / 相对子目录」接到后续节点，不要用「批量遍历加载」接序号。
+    循环体内请直接把「图像、相对子目录、文件名」接到后续节点（与「按路径保存」端口上下对齐），
+    不要用「批量遍历加载」接序号。
     """
 
     NOT_IDEMPOTENT = True
@@ -194,7 +195,8 @@ class DirForLoopStart:
         }
 
     RETURN_TYPES = ("FLOW_CONTROL", "INT", "IMAGE", "STRING", "STRING", "STRING", "INT")
-    RETURN_NAMES = ("循环流程", "当前序号", "图像", "文件名", "相对子目录", "相对路径", "图片总数")
+    # 字符串输出顺序与「按路径保存」的 relative_dir、filename 一致，避免连线交叉
+    RETURN_NAMES = ("循环流程", "当前序号", "图像", "相对子目录", "文件名", "相对路径", "图片总数")
     FUNCTION = "start"
     CATEGORY = "SuperFor/批量"
 
@@ -236,7 +238,7 @@ class DirForLoopStart:
         graph = GraphBuilder()
         graph.node("easy whileLoopStart", condition=True, initial_value0=i)
         return {
-            "result": ("stub", i, image, filename, relative_dir, relative_path, total),
+            "result": ("stub", i, image, relative_dir, filename, relative_path, total),
             "expand": graph.finalize(),
         }
 

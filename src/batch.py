@@ -202,7 +202,7 @@ if _HAS_V3:
                 description=(
                     "递归扫描文件夹里的所有图片，逐张送入工作流。\n"
                     "用法：「加载模式」选「逐张」，把本节点 🖼️图像 接修复节点，\n"
-                    "📝文件名 / 📂相对子目录 接「按路径保存」节点；\n"
+                    "📂相对子目录 / 📝文件名 接「按路径保存」同名输入（上下与保存节点对齐）；\n"
                     "然后开启 ComfyUI 的 Auto Queue（或队列 N 次），即可跑完整个文件夹。\n"
                     "⚠ 配合「批量循环-开始」时不要接「当前序号」——请直接用开始节点的图像/路径输出。"
                 ),
@@ -251,8 +251,8 @@ if _HAS_V3:
                 ],
                 outputs=[
                     io.Image.Output(display_name="图像"),
-                    io.String.Output(display_name="文件名"),
                     io.String.Output(display_name="相对子目录"),
+                    io.String.Output(display_name="文件名"),
                     io.String.Output(display_name="相对路径"),
                     io.String.Output(display_name="源完整路径"),
                     io.Int.Output(display_name="当前序号"),
@@ -316,8 +316,8 @@ if _HAS_V3:
 
                 return io.NodeOutput(
                     tensor,
-                    filename,
                     rel_dir,
+                    filename,
                     rel_path,
                     src,
                     cur,
