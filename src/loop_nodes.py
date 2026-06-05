@@ -273,23 +273,6 @@ class SuperForWhileLoopEnd:
                     self.explore_dependencies(parent_id, dynprompt, upstream, parent_ids)
                 upstream[parent_id].append(node_id)
 
-    def explore_output_nodes(self, dynprompt, upstream, output_nodes, parent_ids):
-        for parent_id in upstream:
-            display_id = dynprompt.get_display_node_id(parent_id)
-            for output_id, link in output_nodes.items():
-                out_node = dynprompt.get_node(output_id)
-                # 完成出口必须在循环体外，不能拉进循环体
-                if out_node.get("class_type") == "SuperFor_BatchLoopSink":
-                    continue
-                nid = link[0]
-                if nid in parent_ids and display_id == nid and output_id not in upstream[parent_id]:
-                    if "." in parent_id:
-                        parts = parent_id.split(".")
-                        parts[len(parts) - 1] = output_id
-                        upstream[parent_id].append(".".join(parts))
-                    else:
-                        upstream[parent_id].append(output_id)
-
     def collect_contained(self, node_id, upstream, contained):
         if node_id not in upstream:
             return
@@ -302,24 +285,9 @@ class SuperForWhileLoopEnd:
         if not condition:
             return tuple(kwargs.get("initial_value%d" % i, None) for i in range(MAX_FLOW_NUM))
 
-        import nodes as comfy_nodes
-
         upstream: dict = {}
         parent_ids: list = []
         self.explore_dependencies(unique_id, dynprompt, upstream, parent_ids)
-        parent_ids = list(set(parent_ids))
-
-        output_nodes: dict = {}
-        for nid, node in dynprompt.get_original_prompt().items():
-            class_type = node.get("class_type")
-            class_def = comfy_nodes.NODE_CLASS_MAPPINGS.get(class_type)
-            if class_def is None or not getattr(class_def, "OUTPUT_NODE", False):
-                continue
-            for _k, v in node.get("inputs", {}).items():
-                if is_link(v):
-                    output_nodes[nid] = v
-
-        self.explore_output_nodes(dynprompt, upstream, output_nodes, parent_ids)
 
         contained: dict = {}
         open_node = flow[0]

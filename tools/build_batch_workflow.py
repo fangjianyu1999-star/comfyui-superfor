@@ -249,12 +249,14 @@ def build_dir_loop() -> dict:
         outputs=[out("循环完成", LINK_TYPE_STRING)],
     )
 
+    # 用 ComfyUI 自带的 PreviewAny 作队列出口（无需自定义节点，避免未重启时报 class_type 缺失）
     sink = wf.add(
-        "SuperFor_BatchLoopSink", (1100, 60), (260, 80),
-        title="⑤ 完成出口（必须保留，用于点运行）",
+        "PreviewAny", (1100, 60), (280, 100),
+        title="⑤ 完成出口 PreviewAny（必须保留）",
         widgets=[],
-        inputs=[slot_in("循环结果", LINK_TYPE_STRING)],
-        outputs=[out("完成", LINK_TYPE_STRING)],
+        inputs=[slot_in("source", LINK_TYPE_STRING)],
+        outputs=[out("STRING", LINK_TYPE_STRING)],
+        properties={"Node name for S&R": "PreviewAny"},
     )
 
     wf.link(start, 0, end, 0, LINK_TYPE_FLOW)          # 循环流程 → 结束
