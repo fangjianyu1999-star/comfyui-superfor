@@ -115,7 +115,8 @@ LOADER_WIDGETS = [SRC_DIR, "single", 0, True, "name", ""]
 LOADER_WIDGETS_AQ = [SRC_DIR, "incremental", 0, True, "name", ""]
 COUNT_WIDGETS = [SRC_DIR, True, ""]
 I2I_WIDGETS = ["", "", "", 1024, 1024, 1]  # prompt, image_url, negative_prompt, width, height, batch_size
-SAVER_WIDGETS = [OUT_DIR, "", "", "", "_修复", "png", 95, False]
+SAVER_WIDGETS = [OUT_DIR, "", "", "", "_修复", "png", 95, True]  # 覆盖同名：避免重跑堆 _1 _2
+LOADER_WIDGETS_LOOP = [SRC_DIR, "single", 0, True, "name", ""]  # 指定序号，index 由循环开始节点喂入
 
 
 def loader_outputs() -> list[dict]:
@@ -194,13 +195,13 @@ def build_for_loop() -> dict:
 
 
 def build_dir_loop() -> dict:
-    """用自研「批量循环-开始/结束」节点：自动递归计数，无需填总量、无需连 index。"""
+    """自动循环：开始/结束 + 循环体内「批量遍历加载（指定序号）」取图（避免缓存重复）。"""
     wf = WF()
 
     start = wf.add(
         "SuperFor_DirForLoopStart", (40, 60), (320, 200),
-        title="① 批量循环-开始（自动递归计数）",
-        widgets=[SRC_DIR, True, "按路径名", ""],  # 文件夹路径, 含子文件夹, 排序方式, 文件名筛选
+        title="① 批量循环-开始（自动计数）",
+        widgets=[SRC_DIR, True, "按路径名", ""],
         inputs=[],
         outputs=[
             out("循环流程", LINK_TYPE_FLOW),
@@ -213,17 +214,25 @@ def build_dir_loop() -> dict:
         ],
     )
 
+    loader = wf.add(
+        "SuperFor_LoadImageBatch", (40, 300), (320, 280),
+        title="② 批量遍历加载（指定序号，须在循环体内）",
+        widgets=list(LOADER_WIDGETS_LOOP),
+        inputs=[widget_in("index", LINK_TYPE_INT)],
+        outputs=loader_outputs(),
+    )
+
     i2i = wf.add(
-        "Aiaiartist_ImageToImage", (420, 60), (320, 260),
-        title="② 修复节点占位（换成你的修复节点）",
+        "Aiaiartist_ImageToImage", (420, 300), (320, 260),
+        title="③ 修复节点占位（换成你的修复节点）",
         widgets=list(I2I_WIDGETS),
         inputs=[slot_in("image", LINK_TYPE_IMAGE)],
         outputs=[out("images", LINK_TYPE_IMAGE)],
     )
 
     saver = wf.add(
-        "SuperFor_SaveImageToDir", (800, 60), (320, 300),
-        title="③ 按路径保存",
+        "SuperFor_SaveImageToDir", (800, 300), (320, 300),
+        title="④ 按路径保存",
         widgets=list(SAVER_WIDGETS),
         inputs=[
             slot_in("images", LINK_TYPE_IMAGE),
@@ -234,8 +243,8 @@ def build_dir_loop() -> dict:
     )
 
     end = wf.add(
-        "SuperFor_DirForLoopEnd", (800, 420), (300, 110),
-        title="④ 批量循环-结束",
+        "SuperFor_DirForLoopEnd", (800, 60), (300, 110),
+        title="⑤ 批量循环-结束",
         widgets=[],
         inputs=[
             slot_in("循环流程", LINK_TYPE_FLOW),
@@ -244,12 +253,13 @@ def build_dir_loop() -> dict:
         outputs=[out("循环完成", LINK_TYPE_STRING)],
     )
 
-    wf.link(start, 0, end, 0, LINK_TYPE_FLOW)          # 循环流程 → 循环结束
-    wf.link(start, 2, i2i, 0, LINK_TYPE_IMAGE)         # image → 修复
-    wf.link(i2i, 0, saver, 0, LINK_TYPE_IMAGE)         # 修复 → 保存.images
-    wf.link(start, 4, saver, 1, LINK_TYPE_STRING)      # relative_dir
-    wf.link(start, 3, saver, 2, LINK_TYPE_STRING)      # filename
-    wf.link(saver, 0, end, 1, LINK_TYPE_STRING)        # saved_paths → 循环结束.循环体回接（关键）
+    wf.link(start, 0, end, 0, LINK_TYPE_FLOW)          # 循环流程 → 结束
+    wf.link(start, 1, loader, 0, LINK_TYPE_INT)         # 当前序号 → 加载器.index（关键）
+    wf.link(loader, 0, i2i, 0, LINK_TYPE_IMAGE)         # 图像 → 修复
+    wf.link(i2i, 0, saver, 0, LINK_TYPE_IMAGE)
+    wf.link(loader, 2, saver, 1, LINK_TYPE_STRING)       # relative_dir
+    wf.link(loader, 1, saver, 2, LINK_TYPE_STRING)       # filename
+    wf.link(saver, 0, end, 1, LINK_TYPE_STRING)          # 已保存路径 → 循环体回接（关键）
 
     return wf.dump()
 

@@ -120,19 +120,6 @@ def _count_recursive(directory, include_subdir, filter_keyword, sort) -> int:
     return max(1, len(_scan_images(root, sub, kw, sm)))
 
 
-def _parse_literal_int(value) -> int | None:
-    """把 whileLoopStart 的 condition 等字面值解析为整数。"""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    if isinstance(value, str) and value.strip().isdigit():
-        return int(value.strip())
-    return None
-
-
 def _find_loop_start_inputs(dynprompt, while_open_id) -> dict | None:
     """通过 dynprompt 找到配对的「批量循环-开始」节点 inputs。"""
     if dynprompt is None:
@@ -155,16 +142,7 @@ def _find_loop_start_inputs(dynprompt, while_open_id) -> dict | None:
 
 
 def _resolve_total(dynprompt, while_open_id) -> int:
-    """解析循环总次数：优先读 whileLoopStart.condition，再回退到开始节点目录统计。"""
-    if dynprompt is not None:
-        try:
-            while_node = dynprompt.get_node(while_open_id)
-            cond = _parse_literal_int(while_node.get("inputs", {}).get("condition"))
-            if cond is not None and cond > 0:
-                return cond
-        except Exception as e:  # noqa: BLE001
-            log.debug("[SuperFor_DirForLoopEnd] 读取 whileLoopStart.condition 失败：%s", e)
-
+    """解析循环总次数：始终从「批量循环-开始」的目录参数重新统计（与 easy loadImagesForLoop 一致）。"""
     start_inputs = _find_loop_start_inputs(dynprompt, while_open_id)
     if start_inputs:
         directory, include_subdir, filter_keyword, sort = _read_start_widget_inputs(start_inputs)
@@ -177,10 +155,13 @@ def _resolve_total(dynprompt, while_open_id) -> int:
 class DirForLoopStart:
     """SuperFor 批量循环-开始（自动递归计数）
 
-    指定一个文件夹（可含多层子文件夹），自动统计图片总数并逐张循环，
-    每轮直接输出当前图片及其文件名 / 相对子目录，无需单独的加载器或手填总量。
-    把 image 接修复节点、filename / relative_dir 接保存节点、flow 接「批量循环-结束」。
+    指定文件夹后自动统计图片总数并驱动 for 循环。
+    ⚠ 循环体内请用「当前序号」→「批量遍历加载（指定序号）」取图，
+    不要把本节点的「图像」直接接修复（ComfyUI 子图展开会缓存第一轮输出，导致重复保存）。
     """
+
+    # 循环序号每轮都变，禁止跨轮缓存
+    NOT_IDEMPOTENT = True
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -208,11 +189,8 @@ class DirForLoopStart:
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
-        # 循环序号变化时必须重新执行，否则会缓存第 0 张图导致同一张反复处理
-        try:
-            return int(kwargs.get("initial_value0", 0) or 0)
-        except (TypeError, ValueError):
-            return float("nan")
+        # 必须每轮失效；仅用 initial_value0 会在首轮被 is_changed 缓存冻结
+        return float("nan")
 
     def start(self, **kwargs):
         directory = _pick(kwargs, "文件夹路径", "directory", "📁 文件夹路径", default="")
@@ -241,7 +219,8 @@ class DirForLoopStart:
             log.info("[SuperFor_DirForLoopStart] %d/%d -> %s", idx + 1, total, relative_path)
 
         graph = GraphBuilder()
-        graph.node("easy whileLoopStart", condition=max(1, total), initial_value0=i)
+        # 与 easy-use loadImagesForLoop 一致：condition 用布尔开关，总次数由结束节点的 compare 控制
+        graph.node("easy whileLoopStart", condition=True, initial_value0=i)
         return {
             "result": ("stub", i, image, filename, relative_dir, relative_path, total),
             "expand": graph.finalize(),
@@ -254,6 +233,8 @@ class DirForLoopEnd:
     与「批量循环-开始」配对。内部读取循环总数并控制展开，
     把要进入循环体的结果（如保存节点的 saved_paths）接到本节点的 🔗 循环体回接。
     """
+
+    NOT_IDEMPOTENT = True
 
     @classmethod
     def INPUT_TYPES(cls):
