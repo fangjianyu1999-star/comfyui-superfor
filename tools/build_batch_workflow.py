@@ -199,7 +199,7 @@ def build_for_loop() -> dict:
 
 
 def build_dir_loop() -> dict:
-    """自动循环：开始/结束 + 循环体内「批量遍历加载（指定序号）」取图（避免缓存重复）。"""
+    """自动循环：开始节点直接出图/路径，循环体内不再经「批量遍历加载」接序号（会落后一轮）。"""
     wf = WF()
 
     start = wf.add(
@@ -218,25 +218,17 @@ def build_dir_loop() -> dict:
         ],
     )
 
-    loader = wf.add(
-        "SuperFor_LoadImageBatch", (40, 300), (320, 280),
-        title="② 批量遍历加载（指定序号，须在循环体内）",
-        widgets=list(LOADER_WIDGETS_LOOP),
-        inputs=[widget_in("index", LINK_TYPE_INT)],
-        outputs=loader_outputs(),
-    )
-
     i2i = wf.add(
-        "Aiaiartist_ImageToImage", (400, 300), (320, 260),
-        title="③ 修复节点占位（换成你的修复节点）",
+        "Aiaiartist_ImageToImage", (400, 220), (320, 260),
+        title="② 修复节点占位（换成你的修复节点）",
         widgets=list(I2I_WIDGETS),
         inputs=[slot_in("image", LINK_TYPE_IMAGE)],
         outputs=[out("images", LINK_TYPE_IMAGE)],
     )
 
     saver = wf.add(
-        "SuperFor_SaveImageToDir", (760, 300), (320, 300),
-        title="④ 按路径保存（右侧自动预览）",
+        "SuperFor_SaveImageToDir", (760, 220), (320, 300),
+        title="③ 按路径保存（右侧自动预览）",
         widgets=list(SAVER_WIDGETS),
         inputs=[
             slot_in("images", LINK_TYPE_IMAGE),
@@ -248,7 +240,7 @@ def build_dir_loop() -> dict:
 
     end = wf.add(
         "SuperFor_DirForLoopEnd", (760, 60), (300, 110),
-        title="⑤ 批量循环-结束",
+        title="④ 批量循环-结束",
         widgets=[],
         inputs=[
             slot_in("循环流程", LINK_TYPE_FLOW),
@@ -258,11 +250,10 @@ def build_dir_loop() -> dict:
     )
 
     wf.link(start, 0, end, 0, LINK_TYPE_FLOW)          # 循环流程 → 结束
-    wf.link(start, 1, loader, 0, LINK_TYPE_INT)         # 当前序号 → 加载器.index（关键）
-    wf.link(loader, 0, i2i, 0, LINK_TYPE_IMAGE)         # 图像 → 修复
+    wf.link(start, 2, i2i, 0, LINK_TYPE_IMAGE)         # 图像 → 修复（直接接开始，勿经加载器）
     wf.link(i2i, 0, saver, 0, LINK_TYPE_IMAGE)          # 修复 → 保存
-    wf.link(loader, 2, saver, 1, LINK_TYPE_STRING)       # relative_dir
-    wf.link(loader, 1, saver, 2, LINK_TYPE_STRING)       # filename
+    wf.link(start, 4, saver, 1, LINK_TYPE_STRING)       # 相对子目录
+    wf.link(start, 3, saver, 2, LINK_TYPE_STRING)       # 文件名
     wf.link(saver, 0, end, 1, LINK_TYPE_STRING)          # 已保存路径 → 循环体回接（关键）
 
     return wf.dump()
