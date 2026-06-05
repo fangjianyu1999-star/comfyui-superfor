@@ -268,9 +268,7 @@ class DirForLoopEnd:
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
-        # 循环体回接内容每轮不同，避免结束节点被错误缓存
-        anchor = _pick(kwargs, "循环体回接", "loop_anchor", "🔗 循环体回接", "initial_value1", default="")
-        return str(anchor)
+        return float("nan")
 
     def end(self, dynprompt=None, extra_pnginfo=None, unique_id=None, **kwargs):
         flow = _pick(kwargs, "循环流程", "flow", "🔁 循环流程")

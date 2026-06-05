@@ -387,14 +387,12 @@ if _HAS_V3:
                         "relative_dir",
                         display_name="相对子目录",
                         default="",
-                        optional=True,
                         tooltip="相对子目录（接加载器的 📂相对子目录，保留原结构），可留空",
                     ),
                     io.String.Input(
                         "filename",
                         display_name="文件名",
                         default="",
-                        optional=True,
                         tooltip="文件名（不含扩展名，接加载器的 📝文件名）；留空则用时间戳",
                     ),
                     io.String.Input(
@@ -457,7 +455,10 @@ if _HAS_V3:
                 os.makedirs(target_dir, exist_ok=True)
 
                 ext = {"png": ".png", "jpg": ".jpg", "webp": ".webp"}[image_format]
-                base_name = (filename or "").strip()
+                # 防止 widgets_values 错位时把 quality/overwrite 塞进前后缀
+                prefix = filename_prefix if isinstance(filename_prefix, str) else ""
+                suffix = filename_suffix if isinstance(filename_suffix, str) else ""
+                base_name = (filename or "").strip() if isinstance(filename, str) else ""
                 if not base_name:
                     import time
 
@@ -468,7 +469,7 @@ if _HAS_V3:
                 saved: list[str] = []
 
                 for i, pil in enumerate(pil_list):
-                    name = f"{filename_prefix}{base_name}{filename_suffix}"
+                    name = f"{prefix}{base_name}{suffix}"
                     if batch_n > 1:
                         name = f"{name}_{i:02d}"
 

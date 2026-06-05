@@ -117,6 +117,9 @@ COUNT_WIDGETS = [SRC_DIR, True, ""]
 I2I_WIDGETS = ["", "", "", 1024, 1024, 1]  # prompt, image_url, negative_prompt, width, height, batch_size
 SAVER_WIDGETS = [OUT_DIR, "", "", "", "_修复", "png", 95, True]  # 覆盖同名：避免重跑堆 _1 _2
 LOADER_WIDGETS_LOOP = [SRC_DIR, "single", 0, True, "name", ""]  # 指定序号，index 由循环开始节点喂入
+# ImageScale: upscale_method, width, height(0=按比例), crop
+PREVIEW_SCALE_WIDGETS = ["lanczos", 1280, 0, "disabled"]
+# 预览由「按路径保存」节点内置 PreviewImage UI 提供，勿再加 PreviewImage 节点（会与保存同为 OUTPUT，导致每张重复跑）
 
 
 def loader_outputs() -> list[dict]:
@@ -223,7 +226,7 @@ def build_dir_loop() -> dict:
     )
 
     i2i = wf.add(
-        "Aiaiartist_ImageToImage", (420, 300), (320, 260),
+        "Aiaiartist_ImageToImage", (400, 300), (320, 260),
         title="③ 修复节点占位（换成你的修复节点）",
         widgets=list(I2I_WIDGETS),
         inputs=[slot_in("image", LINK_TYPE_IMAGE)],
@@ -231,8 +234,8 @@ def build_dir_loop() -> dict:
     )
 
     saver = wf.add(
-        "SuperFor_SaveImageToDir", (800, 300), (320, 300),
-        title="④ 按路径保存",
+        "SuperFor_SaveImageToDir", (760, 300), (320, 300),
+        title="④ 按路径保存（右侧自动预览）",
         widgets=list(SAVER_WIDGETS),
         inputs=[
             slot_in("images", LINK_TYPE_IMAGE),
@@ -243,7 +246,7 @@ def build_dir_loop() -> dict:
     )
 
     end = wf.add(
-        "SuperFor_DirForLoopEnd", (800, 60), (300, 110),
+        "SuperFor_DirForLoopEnd", (760, 60), (300, 110),
         title="⑤ 批量循环-结束",
         widgets=[],
         inputs=[
@@ -256,7 +259,7 @@ def build_dir_loop() -> dict:
     wf.link(start, 0, end, 0, LINK_TYPE_FLOW)          # 循环流程 → 结束
     wf.link(start, 1, loader, 0, LINK_TYPE_INT)         # 当前序号 → 加载器.index（关键）
     wf.link(loader, 0, i2i, 0, LINK_TYPE_IMAGE)         # 图像 → 修复
-    wf.link(i2i, 0, saver, 0, LINK_TYPE_IMAGE)
+    wf.link(i2i, 0, saver, 0, LINK_TYPE_IMAGE)          # 修复 → 保存
     wf.link(loader, 2, saver, 1, LINK_TYPE_STRING)       # relative_dir
     wf.link(loader, 1, saver, 2, LINK_TYPE_STRING)       # filename
     wf.link(saver, 0, end, 1, LINK_TYPE_STRING)          # 已保存路径 → 循环体回接（关键）
@@ -276,7 +279,7 @@ def build_auto_queue() -> dict:
     )
 
     i2i = wf.add(
-        "Aiaiartist_ImageToImage", (420, 60), (320, 260),
+        "Aiaiartist_ImageToImage", (400, 60), (320, 260),
         title="② 修复节点占位（换成你的修复节点）",
         widgets=list(I2I_WIDGETS),
         inputs=[slot_in("image", LINK_TYPE_IMAGE)],
@@ -284,7 +287,7 @@ def build_auto_queue() -> dict:
     )
 
     saver = wf.add(
-        "SuperFor_SaveImageToDir", (800, 60), (320, 300),
+        "SuperFor_SaveImageToDir", (760, 60), (320, 300),
         title="③ 按路径保存",
         widgets=list(SAVER_WIDGETS),
         inputs=[
