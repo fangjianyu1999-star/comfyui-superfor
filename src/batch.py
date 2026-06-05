@@ -141,11 +141,25 @@ except ImportError:  # pragma: no cover
     _HAS_V3 = False
 
 
+def _resize_max_side(pil: Image.Image, max_side: int) -> Image.Image:
+    """按长边限制缩放；max_side<=0 时不缩放。"""
+    if max_side <= 0:
+        return pil
+    w, h = pil.size
+    longest = max(w, h)
+    if longest <= max_side:
+        return pil
+    scale = max_side / float(longest)
+    nw = max(1, int(round(w * scale)))
+    nh = max(1, int(round(h * scale)))
+    return pil.resize((nw, nh), Image.Resampling.LANCZOS)
+
+
 def get_batch_v3_nodes() -> list[type]:
     """返回本模块的 V3 节点类列表（供 nodes.py 汇总注册）。"""
     if not _HAS_V3:
         return []
-    return [LoadImageBatchV3, SaveImageToDirV3, CountImagesInDirV3]
+    return [LoadImageBatchV3, SaveImageToDirV3, CountImagesInDirV3, BatchFolderExportV3]
 
 
 if _HAS_V3:
@@ -510,7 +524,8 @@ if _HAS_V3:
                     log.info("[SuperFor_SaveImageToDir] 已保存 %s", out_path)
 
                 result = "\n".join(saved)
-                return io.NodeOutput(result, ui=ui.PreviewImage(images, cls=cls))
+                # 循环场景下不要返回 PreviewImage UI，避免子图展开时重复触发执行
+                return io.NodeOutput(result)
             except Exception as e:  # noqa: BLE001
                 log.exception("[SuperFor_SaveImageToDir] 失败")
                 msg = pretty_error("保存失败", e)
@@ -527,3 +542,158 @@ if _HAS_V3:
             while os.path.exists(f"{stem}_{i}{ext}"):
                 i += 1
             return f"{stem}_{i}{ext}"
+
+    class BatchFolderExportV3(io.ComfyNode):
+        """SuperFor 文件夹批量导出（一次跑完，无图展开循环）
+
+        在节点内部用 Python for 循环逐张处理，避免 ComfyUI 循环子图缓存导致重复保存。
+        适合：A 文件夹 → 可选缩放 → B 文件夹（保留子目录结构）。
+        """
+
+        @classmethod
+        def define_schema(cls) -> io.Schema:
+            return io.Schema(
+                node_id="SuperFor_BatchFolderExport",
+                display_name="文件夹批量导出",
+                category=CATEGORY_BATCH,
+                description=(
+                    "一次队列跑完整个文件夹：读取 A → 可选按长边缩放 → 保存到 B。\n"
+                    "不经过图展开循环，每张只处理一遍，最稳定。\n"
+                    "若需接修复 API 等节点，请用「批量循环-开始/结束」工作流。"
+                ),
+                inputs=[
+                    io.String.Input(
+                        "directory",
+                        display_name="源文件夹",
+                        default="",
+                        tooltip="要读取的根文件夹，支持子文件夹",
+                    ),
+                    io.String.Input(
+                        "output_root",
+                        display_name="保存根目录",
+                        default="",
+                        tooltip="输出根目录，会保留源目录的子文件夹结构",
+                    ),
+                    io.Boolean.Input(
+                        "include_subdir",
+                        display_name="含子文件夹",
+                        default=True,
+                    ),
+                    io.Combo.Input(
+                        "sort",
+                        display_name="排序方式",
+                        options=[SORT_NAME, SORT_MTIME],
+                        default=SORT_NAME,
+                    ),
+                    io.String.Input(
+                        "filter_keyword",
+                        display_name="文件名筛选",
+                        default="",
+                        optional=True,
+                    ),
+                    io.Int.Input(
+                        "max_side",
+                        display_name="长边上限",
+                        default=0,
+                        min=0,
+                        max=8192,
+                        tooltip="0=不缩放；例如 1920 表示长边不超过 1920 像素",
+                    ),
+                    io.String.Input(
+                        "filename_suffix",
+                        display_name="文件名后缀",
+                        default="",
+                        optional=True,
+                        tooltip="例如 _修复，可留空",
+                    ),
+                    io.Combo.Input(
+                        "image_format",
+                        display_name="保存格式",
+                        options=["png", "jpg", "webp"],
+                        default="png",
+                    ),
+                    io.Int.Input(
+                        "quality",
+                        display_name="图片质量",
+                        default=95,
+                        min=1,
+                        max=100,
+                    ),
+                    io.Boolean.Input(
+                        "overwrite",
+                        display_name="覆盖同名",
+                        default=True,
+                    ),
+                ],
+                outputs=[
+                    io.String.Output(display_name="导出摘要"),
+                    io.Int.Output(display_name="成功数量"),
+                ],
+                is_output_node=True,
+            )
+
+        @classmethod
+        def execute(
+            cls,
+            directory,
+            output_root,
+            include_subdir=True,
+            sort=SORT_NAME,
+            filter_keyword="",
+            max_side=0,
+            filename_suffix="",
+            image_format="png",
+            quality=95,
+            overwrite=True,
+        ):
+            root = _expand_dir(directory)
+            out_root = _expand_dir(output_root)
+            if not os.path.isdir(root):
+                raise RuntimeError(f"源文件夹不存在：{root}")
+            if not (output_root or "").strip():
+                raise RuntimeError("请填写保存根目录 output_root")
+
+            files = _scan_images(root, include_subdir, filter_keyword, sort)
+            total = len(files)
+            if total == 0:
+                raise RuntimeError(f"源文件夹里没有图片：{root}")
+
+            suffix = (filename_suffix or "").strip()
+            ext = {"png": ".png", "jpg": ".jpg", "webp": ".webp"}[image_format]
+            saved: list[str] = []
+
+            for idx, src in enumerate(files):
+                rel_path = os.path.relpath(src, root)
+                rel_dir = os.path.dirname(rel_path)
+                base_name = os.path.splitext(os.path.basename(src))[0]
+                target_dir = os.path.normpath(os.path.join(out_root, rel_dir))
+                if not _is_under_root(out_root, target_dir):
+                    target_dir = out_root
+                os.makedirs(target_dir, exist_ok=True)
+
+                pil = _load_pil(src)
+                pil = _resize_max_side(pil, int(max_side or 0))
+                out_name = f"{base_name}{suffix}{ext}"
+                out_path = os.path.join(target_dir, out_name)
+                if not overwrite:
+                    out_path = SaveImageToDirV3._dedupe(out_path)
+
+                save_img = pil
+                if image_format == "jpg" and save_img.mode != "RGB":
+                    save_img = save_img.convert("RGB")
+                if image_format == "png":
+                    save_img.save(out_path, format="PNG", compress_level=4)
+                elif image_format == "jpg":
+                    save_img.save(out_path, format="JPEG", quality=quality)
+                else:
+                    save_img.save(out_path, format="WEBP", quality=quality)
+
+                saved.append(out_path)
+                log.info(
+                    "[SuperFor_BatchFolderExport] %d/%d -> %s",
+                    idx + 1, total, out_path,
+                )
+
+            summary = f"共导出 {len(saved)} 张到 {out_root}"
+            log.info("[SuperFor_BatchFolderExport] 完成：%s", summary)
+            return io.NodeOutput(summary, len(saved))

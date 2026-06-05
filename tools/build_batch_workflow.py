@@ -298,10 +298,27 @@ def build_auto_queue() -> dict:
     return wf.dump()
 
 
+def build_batch_export() -> dict:
+    """最稳：单节点一次跑完（适合缩放/复制，不经图展开循环）。"""
+    wf = WF()
+    wf.add(
+        "SuperFor_BatchFolderExport", (40, 60), (360, 340),
+        title="文件夹批量导出（推荐：缩放/复制用这个）",
+        widgets=[SRC_DIR, OUT_DIR, True, "name", "", 0, "_修复", "png", 95, True],
+        inputs=[],
+        outputs=[
+            out("summary", LINK_TYPE_STRING),
+            out("count", LINK_TYPE_INT),
+        ],
+    )
+    return wf.dump()
+
+
 def main() -> None:
     desktop = os.path.expanduser("~/Desktop")
     targets = {
         os.path.join(desktop, "批量修复-自动循环.json"): build_dir_loop(),
+        os.path.join(desktop, "批量修复-批量导出.json"): build_batch_export(),
         os.path.join(desktop, "批量修复-AutoQueue.json"): build_auto_queue(),
     }
     for path, data in targets.items():

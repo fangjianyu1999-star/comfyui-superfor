@@ -2,19 +2,15 @@
 自动计数的批量循环节点（递归遍历子目录）
 =========================================
 
-背景：easy-use 的 `easy forLoopStart` 要求 `total`（总量）必须是**字面数字**，
-不能用连线喂（`forLoopEnd` 会把它当字面值塞进内部展开的子图，连线会指向子图里
-不存在的节点，导致循环只跑一次）。而 easy-use 自带的目录循环用 `os.listdir`，
-**不递归子目录**，对「图像a/文件1、文件2...」这种套文件夹结构无效。
-
-本模块提供一对循环节点，逐字复用 easy-use 已验证的循环展开逻辑
-（`easy whileLoopStart/whileLoopEnd/mathInt/compare`），仅把「读 total 字面值」
-换成「在 Python 里递归统计目录图片数」（仍是字面整数，规避连线问题）：
+提供一对循环节点，复用 easy-use 已验证的 whileLoop/mathInt/compare 展开逻辑，
+并在自定义 whileLoopEnd 中把递增后的序号写回「批量循环-开始」的 hidden initial_value0，
+避免同一张图在循环体内被重复执行。
 
 - SuperFor_DirForLoopStart  批量循环-开始（自动递归计数 + 直接输出当前图）
 - SuperFor_DirForLoopEnd    批量循环-结束
+- SuperFor_WhileLoopEnd     内部用，勿手动添加
 
-⚠ 依赖：需要安装 comfyui-easy-use（提供底层 whileLoop / mathInt / compare 节点）。
+⚠ 依赖：需要安装 comfyui-easy-use（提供 mathInt / compare / whileLoopStart）。
 """
 from __future__ import annotations
 
@@ -34,10 +30,14 @@ log = logging.getLogger("comfyui-superfor")
 
 MAX_FLOW_NUM = 20  # 与 easy-use 保持一致
 
-# 批量循环-开始节点在 prompt 里的 class_type（含旧名兼容）
 _LOOP_START_TYPES = frozenset({
     "SuperFor_DirForLoopStart",
     "Aiaiartist_DirForLoopStart",
+})
+
+_LOOP_END_TYPES = frozenset({
+    "easy whileLoopEnd",
+    "SuperFor_WhileLoopEnd",
 })
 
 
@@ -71,11 +71,12 @@ class ByPassTypeTuple(tuple):
 any_type = AlwaysEqualProxy("*")
 
 try:
-    from comfy_execution.graph_utils import GraphBuilder
+    from comfy_execution.graph_utils import GraphBuilder, is_link
 
     _HAS_GRAPH = GraphBuilder is not None
 except Exception:  # noqa: BLE001  # pragma: no cover
     GraphBuilder = None
+    is_link = None
     _HAS_GRAPH = False
 
 
@@ -108,9 +109,9 @@ def _read_start_widget_inputs(inputs: dict) -> tuple[str, bool, str, str]:
 
 
 def _count_recursive(directory, include_subdir, filter_keyword, sort) -> int:
-    """递归统计目录图片数（字面整数）。参数可能来自原始 prompt，做容错。"""
+    """递归统计目录图片数（字面整数）。"""
     if not isinstance(directory, str):
-        return 1  # directory 被连线（非字面）时无法统计，返回 1 保证至少跑一次
+        return 1
     root = _expand_dir(directory)
     if not os.path.isdir(root):
         return 1
@@ -125,14 +126,6 @@ def _find_loop_start_inputs(dynprompt, while_open_id) -> dict | None:
     if dynprompt is None:
         return None
     try:
-        real_id = dynprompt.get_real_node_id(str(while_open_id))
-        node = dynprompt.get_node(real_id)
-        if node.get("class_type") in _LOOP_START_TYPES:
-            return node.get("inputs", {})
-    except Exception:  # noqa: BLE001
-        pass
-
-    try:
         for nid, node in dynprompt.get_original_prompt().items():
             if node.get("class_type") in _LOOP_START_TYPES:
                 return node.get("inputs", {})
@@ -142,7 +135,7 @@ def _find_loop_start_inputs(dynprompt, while_open_id) -> dict | None:
 
 
 def _resolve_total(dynprompt, while_open_id) -> int:
-    """解析循环总次数：始终从「批量循环-开始」的目录参数重新统计（与 easy loadImagesForLoop 一致）。"""
+    """解析循环总次数：从「批量循环-开始」的目录参数递归统计。"""
     start_inputs = _find_loop_start_inputs(dynprompt, while_open_id)
     if start_inputs:
         directory, include_subdir, filter_keyword, sort = _read_start_widget_inputs(start_inputs)
@@ -152,15 +145,21 @@ def _resolve_total(dynprompt, while_open_id) -> int:
     return 1
 
 
+def _loop_index_changed(**kwargs) -> int:
+    """按循环序号失效缓存；同一序号内允许命中缓存，避免同一张重复跑。"""
+    try:
+        return int(kwargs.get("initial_value0", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 class DirForLoopStart:
     """SuperFor 批量循环-开始（自动递归计数）
 
     指定文件夹后自动统计图片总数并驱动 for 循环。
-    ⚠ 循环体内请直接把本节点的「图像 / 文件名 / 相对子目录」接到修复与保存节点。
-    不要用「批量遍历加载」接「当前序号」——执行顺序会导致加载器落后一轮、同一张重复保存。
+    循环体内请直接把「图像 / 文件名 / 相对子目录」接到后续节点，不要用「批量遍历加载」接序号。
     """
 
-    # 循环序号每轮都变，禁止跨轮缓存
     NOT_IDEMPOTENT = True
 
     @classmethod
@@ -189,8 +188,7 @@ class DirForLoopStart:
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
-        # 必须每轮失效；仅用 initial_value0 会在首轮被 is_changed 缓存冻结
-        return float("nan")
+        return _loop_index_changed(**kwargs)
 
     def start(self, **kwargs):
         directory = _pick(kwargs, "文件夹路径", "directory", "📁 文件夹路径", default="")
@@ -200,11 +198,7 @@ class DirForLoopStart:
         root = _expand_dir(directory)
         files = _scan_images(root, include_subdir, filter_keyword, sort) if os.path.isdir(root) else []
         total = len(files)
-        i = 0
-        try:
-            i = int(kwargs.get("initial_value0", 0) or 0)
-        except (TypeError, ValueError):
-            i = 0
+        i = _loop_index_changed(**kwargs)
 
         if total == 0:
             image = make_error_image(f"目录里没有图片：\n{root}")
@@ -219,7 +213,6 @@ class DirForLoopStart:
             log.info("[SuperFor_DirForLoopStart] %d/%d -> %s", idx + 1, total, relative_path)
 
         graph = GraphBuilder()
-        # 与 easy-use loadImagesForLoop 一致：condition 用布尔开关，总次数由结束节点的 compare 控制
         graph.node("easy whileLoopStart", condition=True, initial_value0=i)
         return {
             "result": ("stub", i, image, filename, relative_dir, relative_path, total),
@@ -227,14 +220,146 @@ class DirForLoopStart:
         }
 
 
+class SuperForWhileLoopEnd:
+    """fork easy whileLoopEnd：展开时把 next index 写回批量循环-开始节点的 initial_value0。"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        inputs = {
+            "required": {
+                "flow": ("FLOW_CONTROL", {"rawLink": True}),
+                "condition": ("BOOLEAN", {}),
+            },
+            "optional": {},
+            "hidden": {
+                "dynprompt": "DYNPROMPT",
+                "unique_id": "UNIQUE_ID",
+                "extra_pnginfo": "EXTRA_PNGINFO",
+            },
+        }
+        for i in range(MAX_FLOW_NUM):
+            inputs["optional"]["initial_value%d" % i] = (any_type,)
+        return inputs
+
+    RETURN_TYPES = ByPassTypeTuple(tuple([any_type] * MAX_FLOW_NUM))
+    RETURN_NAMES = ByPassTypeTuple(tuple(["value%d" % i for i in range(MAX_FLOW_NUM)]))
+    FUNCTION = "while_loop_close"
+    CATEGORY = "SuperFor/批量"
+
+    def explore_dependencies(self, node_id, dynprompt, upstream, parent_ids):
+        node_info = dynprompt.get_node(node_id)
+        if "inputs" not in node_info:
+            return
+
+        for _k, v in node_info["inputs"].items():
+            if is_link(v):
+                parent_id = v[0]
+                display_id = dynprompt.get_display_node_id(parent_id)
+                display_node = dynprompt.get_node(display_id)
+                class_type = display_node["class_type"]
+                if class_type not in _LOOP_END_TYPES and class_type != "SuperFor_DirForLoopEnd":
+                    parent_ids.append(display_id)
+                if parent_id not in upstream:
+                    upstream[parent_id] = []
+                    self.explore_dependencies(parent_id, dynprompt, upstream, parent_ids)
+                upstream[parent_id].append(node_id)
+
+    def explore_output_nodes(self, dynprompt, upstream, output_nodes, parent_ids):
+        import nodes as comfy_nodes
+
+        for parent_id in upstream:
+            display_id = dynprompt.get_display_node_id(parent_id)
+            for output_id, link in output_nodes.items():
+                nid = link[0]
+                if nid in parent_ids and display_id == nid and output_id not in upstream[parent_id]:
+                    if "." in parent_id:
+                        parts = parent_id.split(".")
+                        parts[len(parts) - 1] = output_id
+                        upstream[parent_id].append(".".join(parts))
+                    else:
+                        upstream[parent_id].append(output_id)
+
+    def collect_contained(self, node_id, upstream, contained):
+        if node_id not in upstream:
+            return
+        for child_id in upstream[node_id]:
+            if child_id not in contained:
+                contained[child_id] = True
+                self.collect_contained(child_id, upstream, contained)
+
+    def while_loop_close(self, flow, condition, dynprompt=None, unique_id=None, **kwargs):
+        if not condition:
+            return tuple(kwargs.get("initial_value%d" % i, None) for i in range(MAX_FLOW_NUM))
+
+        import nodes as comfy_nodes
+
+        upstream: dict = {}
+        parent_ids: list = []
+        self.explore_dependencies(unique_id, dynprompt, upstream, parent_ids)
+        parent_ids = list(set(parent_ids))
+
+        output_nodes: dict = {}
+        for nid, node in dynprompt.get_original_prompt().items():
+            class_type = node.get("class_type")
+            class_def = comfy_nodes.NODE_CLASS_MAPPINGS.get(class_type)
+            if class_def is None or not getattr(class_def, "OUTPUT_NODE", False):
+                continue
+            for _k, v in node.get("inputs", {}).items():
+                if is_link(v):
+                    output_nodes[nid] = v
+
+        self.explore_output_nodes(dynprompt, upstream, output_nodes, parent_ids)
+
+        contained: dict = {}
+        open_node = flow[0]
+        self.collect_contained(open_node, upstream, contained)
+        contained[unique_id] = True
+        contained[open_node] = True
+
+        graph = GraphBuilder()
+        for node_id in contained:
+            original_node = dynprompt.get_node(node_id)
+            node = graph.node(
+                original_node["class_type"],
+                "Recurse" if node_id == unique_id else node_id,
+            )
+            node.set_override_display_id(node_id)
+
+        for node_id in contained:
+            original_node = dynprompt.get_node(node_id)
+            node = graph.lookup_node("Recurse" if node_id == unique_id else node_id)
+            for k, v in original_node["inputs"].items():
+                if is_link(v) and v[0] in contained:
+                    parent = graph.lookup_node(v[0])
+                    node.set_input(k, parent.out(v[1]))
+                else:
+                    node.set_input(k, v)
+
+        new_open = graph.lookup_node(open_node)
+        next_index = kwargs.get("initial_value0", None)
+        for i in range(MAX_FLOW_NUM):
+            key = "initial_value%d" % i
+            new_open.set_input(key, kwargs.get(key, None))
+
+        # 关键补丁：下一轮必须把递增后的序号写回「批量循环-开始」
+        for node_id in contained:
+            original_node = dynprompt.get_node(node_id)
+            if original_node.get("class_type") not in _LOOP_START_TYPES:
+                continue
+            start_node = graph.lookup_node(node_id)
+            if start_node is not None:
+                start_node.set_input("initial_value0", next_index)
+
+        my_clone = graph.lookup_node("Recurse")
+        result = map(lambda x: my_clone.out(x), range(MAX_FLOW_NUM))
+        return {
+            "result": tuple(result),
+            "expand": graph.finalize(),
+        }
+
+
 class DirForLoopEnd:
-    """SuperFor 批量循环-结束
-
-    与「批量循环-开始」配对。内部读取循环总数并控制展开，
-    把要进入循环体的结果（如保存节点的 saved_paths）接到本节点的 🔗 循环体回接。
-    """
-
-    NOT_IDEMPOTENT = True
+    """SuperFor 批量循环-结束"""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -263,7 +388,6 @@ class DirForLoopEnd:
     RETURN_NAMES = ("循环完成",)
     FUNCTION = "end"
     CATEGORY = "SuperFor/批量"
-    # 关键：标记为输出节点，否则 GUI 点「运行」时本节点不会被执行，循环不会展开（只跑一次）
     OUTPUT_NODE = True
 
     def end(self, dynprompt=None, extra_pnginfo=None, unique_id=None, **kwargs):
@@ -277,11 +401,11 @@ class DirForLoopEnd:
         sub = graph.node("easy mathInt", operation="add", a=[while_open, 1], b=1)
         cond = graph.node("easy compare", a=sub.out(0), b=total, comparison="a < b")
         while_close = graph.node(
-            "easy whileLoopEnd",
+            "SuperFor_WhileLoopEnd",
             flow=flow,
             condition=cond.out(0),
             initial_value0=sub.out(0),
-            initial_value1=anchor,  # 唯一的「循环体锚点」，把保存节点拉进循环体
+            initial_value1=anchor,
         )
         return {
             "result": (while_close.out(1),),
@@ -293,10 +417,12 @@ if _HAS_GRAPH:
     NODE_CLASS_MAPPINGS = {
         "SuperFor_DirForLoopStart": DirForLoopStart,
         "SuperFor_DirForLoopEnd": DirForLoopEnd,
+        "SuperFor_WhileLoopEnd": SuperForWhileLoopEnd,
     }
     NODE_DISPLAY_NAME_MAPPINGS = {
         "SuperFor_DirForLoopStart": "批量循环-开始（自动计数）",
         "SuperFor_DirForLoopEnd": "批量循环-结束",
+        "SuperFor_WhileLoopEnd": "批量循环-内部结束",
     }
 else:  # pragma: no cover
     NODE_CLASS_MAPPINGS = {}
