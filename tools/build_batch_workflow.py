@@ -111,8 +111,8 @@ def count_images(directory: str, include_subdir: bool = True) -> int:
     return max(1, n)
 
 # 各节点 widget 顺序（必须与 src/batch.py、src/nodes.py 定义顺序一致）
-LOADER_WIDGETS = [SRC_DIR, "指定序号(single)", 0, True, "按路径名", ""]
-LOADER_WIDGETS_AQ = [SRC_DIR, "逐张(incremental)", 0, True, "按路径名", ""]
+LOADER_WIDGETS = [SRC_DIR, "single", 0, True, "name", ""]
+LOADER_WIDGETS_AQ = [SRC_DIR, "incremental", 0, True, "name", ""]
 COUNT_WIDGETS = [SRC_DIR, True, ""]
 I2I_WIDGETS = ["", "", "", 1024, 1024, 1]  # prompt, image_url, negative_prompt, width, height, batch_size
 SAVER_WIDGETS = [OUT_DIR, "", "", "", "_修复", "png", 95, False]
@@ -200,7 +200,7 @@ def build_dir_loop() -> dict:
     start = wf.add(
         "SuperFor_DirForLoopStart", (40, 60), (320, 200),
         title="① 批量循环-开始（自动递归计数）",
-        widgets=[SRC_DIR, True, "按路径名", ""],  # directory, include_subdir, sort, filter_keyword
+        widgets=[SRC_DIR, True, "name", ""],  # directory, include_subdir, sort, filter_keyword
         inputs=[],
         outputs=[
             out("flow", LINK_TYPE_FLOW),
@@ -238,10 +238,10 @@ def build_dir_loop() -> dict:
         title="④ 批量循环-结束",
         widgets=[],
         inputs=[
-            slot_in("🔁 循环流程", LINK_TYPE_FLOW),
-            slot_in("🔗 循环体回接", LINK_TYPE_STRING),
+            slot_in("flow", LINK_TYPE_FLOW),
+            slot_in("loop_anchor", LINK_TYPE_STRING),
         ],
-        outputs=[out("✅ 循环完成", LINK_TYPE_STRING)],
+        outputs=[out("done", LINK_TYPE_STRING)],
     )
 
     wf.link(start, 0, end, 0, LINK_TYPE_FLOW)          # flow → 循环结束
@@ -249,7 +249,7 @@ def build_dir_loop() -> dict:
     wf.link(i2i, 0, saver, 0, LINK_TYPE_IMAGE)         # 修复 → 保存.images
     wf.link(start, 4, saver, 1, LINK_TYPE_STRING)      # relative_dir
     wf.link(start, 3, saver, 2, LINK_TYPE_STRING)      # filename
-    wf.link(saver, 0, end, 1, LINK_TYPE_STRING)        # saved_paths → 循环结束.🔗循环体回接（关键）
+    wf.link(saver, 0, end, 1, LINK_TYPE_STRING)        # saved_paths → 循环结束.loop_anchor（关键）
 
     return wf.dump()
 

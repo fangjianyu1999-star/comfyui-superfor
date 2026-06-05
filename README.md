@@ -47,3 +47,17 @@ python tools/build_batch_workflow.py
 ## 📌 备注
 
 节点内部 ID 为 `SuperFor_*`（如 `SuperFor_DirForLoopStart`）。循环节点仍注册 `Aiaiartist_*` 别名以兼容旧工作流，建议重新导入 `tools/build_batch_workflow.py` 生成的新版工作流。
+
+## 界面乱码（Windows 常见）
+
+若节点标题/参数出现 `åæ'è` 这类乱码，通常是 **UTF-8 中文被错误解码**（旧版把 emoji+中文写进了 V1 端口名）。
+
+当前版本已改为：
+- **端口名 / 参数键**：英文 ASCII（`flow`、`directory`、`loop_anchor`）
+- **节点显示名**：纯中文、无 emoji（`批量循环-开始`）
+- **工作流 JSON**：`utf-8` 保存（`ensure_ascii=False`）
+
+Windows 用户请确保：
+1. `git pull` 更新到最新版后 **重启 ComfyUI**
+2. **重新导入** `批量修复-自动循环.json`（不要用旧工作流）
+3. 若仍有乱码，启动前设置环境变量：`set PYTHONUTF8=1`（CMD）或 `$env:PYTHONUTF8=1`（PowerShell）

@@ -79,12 +79,23 @@ except Exception:  # noqa: BLE001  # pragma: no cover
     _HAS_GRAPH = False
 
 
+def _normalize_sort(value) -> str:
+    """兼容旧工作流里的中文排序选项。"""
+    if value in (SORT_NAME, SORT_MTIME):
+        return value
+    if value in ("按路径名", "name"):
+        return SORT_NAME
+    if value in ("按修改时间", "mtime"):
+        return SORT_MTIME
+    return SORT_NAME
+
+
 def _read_start_widget_inputs(inputs: dict) -> tuple[str, bool, str, str]:
-    """从批量循环-开始节点的 inputs 读取目录参数（兼容中英文键名）。"""
-    directory = inputs.get("📁 文件夹路径", inputs.get("directory", ""))
-    include_subdir = inputs.get("📂 含子文件夹", inputs.get("include_subdir", True))
-    filter_keyword = inputs.get("🔍 文件名筛选", inputs.get("filter_keyword", ""))
-    sort = inputs.get("↕️ 排序方式", inputs.get("sort", SORT_NAME))
+    """从批量循环-开始节点的 inputs 读取目录参数（英文键优先，兼容旧中文键）。"""
+    directory = inputs.get("directory", inputs.get("📁 文件夹路径", ""))
+    include_subdir = inputs.get("include_subdir", inputs.get("📂 含子文件夹", True))
+    filter_keyword = inputs.get("filter_keyword", inputs.get("🔍 文件名筛选", ""))
+    sort = _normalize_sort(inputs.get("sort", inputs.get("↕️ 排序方式", SORT_NAME)))
     return directory, include_subdir, filter_keyword, sort
 
 
@@ -167,12 +178,12 @@ class DirForLoopStart:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "📁 文件夹路径": ("STRING", {"default": "", "tooltip": "根文件夹，支持 ~，会自动递归子文件夹"}),
-                "📂 含子文件夹": ("BOOLEAN", {"default": True}),
-                "↕️ 排序方式": ([SORT_NAME, SORT_MTIME], {"default": SORT_NAME}),
+                "directory": ("STRING", {"default": "", "tooltip": "根文件夹，支持 ~，会自动递归子文件夹"}),
+                "include_subdir": ("BOOLEAN", {"default": True, "tooltip": "是否递归子文件夹"}),
+                "sort": (["name", "mtime"], {"default": "name", "tooltip": "name=按路径名, mtime=按修改时间"}),
             },
             "optional": {
-                "🔍 文件名筛选": ("STRING", {"default": "", "tooltip": "只加载文件名含该关键字的图片，可留空"}),
+                "filter_keyword": ("STRING", {"default": "", "tooltip": "只加载文件名含该关键字的图片，可留空"}),
             },
             "hidden": {
                 "initial_value0": (any_type,),
@@ -183,9 +194,9 @@ class DirForLoopStart:
         }
 
     RETURN_TYPES = ("FLOW_CONTROL", "INT", "IMAGE", "STRING", "STRING", "STRING", "INT")
-    RETURN_NAMES = ("🔁 循环流程", "🔢 当前序号", "🖼️ 图像", "📝 文件名", "📂 相对子目录", "📄 相对路径", "🔢 图片总数")
+    RETURN_NAMES = ("flow", "index", "image", "filename", "relative_dir", "relative_path", "total")
     FUNCTION = "start"
-    CATEGORY = "🔁 SuperFor/批量"
+    CATEGORY = "SuperFor/批量"
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
@@ -196,10 +207,10 @@ class DirForLoopStart:
             return float("nan")
 
     def start(self, **kwargs):
-        directory = kwargs.get("📁 文件夹路径", "")
-        include_subdir = kwargs.get("📂 含子文件夹", True)
-        sort = kwargs.get("↕️ 排序方式", SORT_NAME)
-        filter_keyword = kwargs.get("🔍 文件名筛选", "")
+        directory = kwargs.get("directory", kwargs.get("📁 文件夹路径", ""))
+        include_subdir = kwargs.get("include_subdir", kwargs.get("📂 含子文件夹", True))
+        sort = _normalize_sort(kwargs.get("sort", kwargs.get("↕️ 排序方式", SORT_NAME)))
+        filter_keyword = kwargs.get("filter_keyword", kwargs.get("🔍 文件名筛选", ""))
         root = _expand_dir(directory)
         files = _scan_images(root, include_subdir, filter_keyword, sort) if os.path.isdir(root) else []
         total = len(files)
@@ -240,14 +251,14 @@ class DirForLoopEnd:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "🔁 循环流程": ("FLOW_CONTROL", {"rawLink": True}),
+                "flow": ("FLOW_CONTROL", {"rawLink": True}),
             },
             "optional": {
-                "🔗 循环体回接": (
+                "loop_anchor": (
                     any_type,
                     {
                         "rawLink": True,
-                        "tooltip": "把「按路径保存」节点的『💾 已保存路径』接到这里。\n"
+                        "tooltip": "把「按路径保存」节点的「已保存路径」接到这里。\n"
                                    "这一根线决定了保存节点是否在循环体内——不接的话每张图不会保存，循环也只会跑一次。",
                     },
                 ),
@@ -260,22 +271,21 @@ class DirForLoopEnd:
         }
 
     RETURN_TYPES = (any_type,)
-    RETURN_NAMES = ("✅ 循环完成",)
+    RETURN_NAMES = ("done",)
     FUNCTION = "end"
-    CATEGORY = "🔁 SuperFor/批量"
+    CATEGORY = "SuperFor/批量"
     # 关键：标记为输出节点，否则 GUI 点「运行」时本节点不会被执行，循环不会展开（只跑一次）
     OUTPUT_NODE = True
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
         # 循环体回接内容每轮不同，避免结束节点被错误缓存
-        anchor = kwargs.get("🔗 循环体回接", kwargs.get("initial_value1", ""))
+        anchor = kwargs.get("loop_anchor", kwargs.get("🔗 循环体回接", kwargs.get("initial_value1", "")))
         return str(anchor)
 
     def end(self, dynprompt=None, extra_pnginfo=None, unique_id=None, **kwargs):
-        # 兼容旧工作流：新键名优先，回退到旧英文键名
-        flow = kwargs.get("🔁 循环流程", kwargs.get("flow"))
-        anchor = kwargs.get("🔗 循环体回接", kwargs.get("initial_value1", None))
+        flow = kwargs.get("flow", kwargs.get("🔁 循环流程"))
+        anchor = kwargs.get("loop_anchor", kwargs.get("🔗 循环体回接", kwargs.get("initial_value1", None)))
 
         graph = GraphBuilder()
         while_open = flow[0]
@@ -305,10 +315,10 @@ if _HAS_GRAPH:
         "Aiaiartist_DirForLoopEnd": DirForLoopEnd,
     }
     NODE_DISPLAY_NAME_MAPPINGS = {
-        "SuperFor_DirForLoopStart": "🔄 批量循环-开始（自动计数）",
-        "SuperFor_DirForLoopEnd": "🏁 批量循环-结束",
-        "Aiaiartist_DirForLoopStart": "🔄 批量循环-开始（自动计数）",
-        "Aiaiartist_DirForLoopEnd": "🏁 批量循环-结束",
+        "SuperFor_DirForLoopStart": "批量循环-开始（自动计数）",
+        "SuperFor_DirForLoopEnd": "批量循环-结束",
+        "Aiaiartist_DirForLoopStart": "批量循环-开始（自动计数）",
+        "Aiaiartist_DirForLoopEnd": "批量循环-结束",
     }
 else:  # pragma: no cover
     NODE_CLASS_MAPPINGS = {}

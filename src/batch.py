@@ -40,18 +40,18 @@ from .utils import (
 
 log = logging.getLogger("comfyui-superfor")
 
-CATEGORY_BATCH = "🔁 SuperFor/批量"
+CATEGORY_BATCH = "SuperFor/批量"
 
 # 支持的图片扩展名（小写，含点）
 IMAGE_EXTS: tuple[str, ...] = (
     ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif",
 )
 
-MODE_INCREMENTAL = "逐张(incremental)"
-MODE_SINGLE = "指定序号(single)"
+MODE_INCREMENTAL = "incremental"
+MODE_SINGLE = "single"
 
-SORT_NAME = "按路径名"
-SORT_MTIME = "按修改时间"
+SORT_NAME = "name"
+SORT_MTIME = "mtime"
 
 # 加载器游标状态：缓存键 -> {"start": 起始序号, "cursor": 下一张序号}
 # 改变 start_index 会自动重置游标，方便重新从头跑。
@@ -146,7 +146,7 @@ if _HAS_V3:
         def define_schema(cls) -> io.Schema:
             return io.Schema(
                 node_id="SuperFor_LoadImageBatch",
-                display_name="📥 批量遍历加载",
+                display_name="批量遍历加载",
                 category=CATEGORY_BATCH,
                 description=(
                     "递归扫描文件夹里的所有图片，逐张送入工作流。\n"
@@ -157,20 +157,20 @@ if _HAS_V3:
                 inputs=[
                     io.String.Input(
                         "directory",
-                        display_name="📁 文件夹路径",
+                        display_name="文件夹路径",
                         default="",
                         tooltip="根文件夹路径，支持 ~ 和子文件夹，例如 ~/Desktop/图像a",
                     ),
                     io.Combo.Input(
                         "mode",
-                        display_name="🔁 加载模式",
+                        display_name="加载模式",
                         options=[MODE_INCREMENTAL, MODE_SINGLE],
                         default=MODE_INCREMENTAL,
                         tooltip="逐张：每次队列自动取下一张（批量用）；指定序号：固定取第 N 张（调试用）",
                     ),
                     io.Int.Input(
                         "index",
-                        display_name="🔢 序号 / 起始",
+                        display_name="序号",
                         default=0,
                         min=0,
                         max=999999,
@@ -178,33 +178,33 @@ if _HAS_V3:
                     ),
                     io.Boolean.Input(
                         "include_subdir",
-                        display_name="📂 含子文件夹",
+                        display_name="含子文件夹",
                         default=True,
                         tooltip="是否递归扫描子文件夹（图像a 里套的 文件1/文件2/...）",
                     ),
                     io.Combo.Input(
                         "sort",
-                        display_name="↕️ 排序方式",
+                        display_name="排序方式",
                         options=[SORT_NAME, SORT_MTIME],
                         default=SORT_NAME,
                         tooltip="遍历顺序",
                     ),
                     io.String.Input(
                         "filter_keyword",
-                        display_name="🔍 文件名筛选",
+                        display_name="文件名筛选",
                         default="",
                         optional=True,
                         tooltip="只加载文件名包含该关键字的图片，可留空",
                     ),
                 ],
                 outputs=[
-                    io.Image.Output(display_name="🖼️ 图像"),
-                    io.String.Output(display_name="📝 文件名"),        # 不含扩展名
-                    io.String.Output(display_name="📂 相对子目录"),    # 相对根目录的子目录
-                    io.String.Output(display_name="📄 相对路径"),      # 子目录/原文件名.ext
-                    io.String.Output(display_name="🗂️ 源完整路径"),    # 源文件绝对路径
-                    io.Int.Output(display_name="🔢 当前序号"),
-                    io.Int.Output(display_name="🔢 图片总数"),
+                    io.Image.Output(display_name="图像"),
+                    io.String.Output(display_name="文件名"),
+                    io.String.Output(display_name="相对子目录"),
+                    io.String.Output(display_name="相对路径"),
+                    io.String.Output(display_name="源完整路径"),
+                    io.Int.Output(display_name="当前序号"),
+                    io.Int.Output(display_name="图片总数"),
                 ],
             )
 
@@ -293,7 +293,7 @@ if _HAS_V3:
         def define_schema(cls) -> io.Schema:
             return io.Schema(
                 node_id="SuperFor_CountImagesInDir",
-                display_name="🔢 目录图片计数",
+                display_name="目录图片计数",
                 category=CATEGORY_BATCH,
                 description=(
                     "统计文件夹里图片总数（可含子文件夹），输出整数。\n"
@@ -303,26 +303,26 @@ if _HAS_V3:
                 inputs=[
                     io.String.Input(
                         "directory",
-                        display_name="📁 文件夹路径",
+                        display_name="文件夹路径",
                         default="",
                         tooltip="要统计的文件夹路径，需与「批量遍历加载」的文件夹路径相同",
                     ),
                     io.Boolean.Input(
                         "include_subdir",
-                        display_name="📂 含子文件夹",
+                        display_name="含子文件夹",
                         default=True,
                         tooltip="是否递归子文件夹（与加载器保持一致）",
                     ),
                     io.String.Input(
                         "filter_keyword",
-                        display_name="🔍 文件名筛选",
+                        display_name="文件名筛选",
                         default="",
                         optional=True,
                         tooltip="只统计文件名含该关键字的图片（与加载器保持一致）",
                     ),
                 ],
                 outputs=[
-                    io.Int.Output(display_name="🔢 图片总数"),
+                    io.Int.Output(display_name="图片总数"),
                 ],
             )
 
@@ -348,7 +348,7 @@ if _HAS_V3:
         def define_schema(cls) -> io.Schema:
             return io.Schema(
                 node_id="SuperFor_SaveImageToDir",
-                display_name="💾 按路径保存",
+                display_name="按路径保存",
                 category=CATEGORY_BATCH,
                 description=(
                     "把结果保存到指定根目录，保留子目录结构和原文件名。\n"
@@ -358,53 +358,53 @@ if _HAS_V3:
                 inputs=[
                     io.Image.Input(
                         "images",
-                        display_name="🖼️ 图像",
+                        display_name="图像",
                         tooltip="要保存的图像（接修复节点输出）",
                     ),
                     io.String.Input(
                         "output_root",
-                        display_name="📁 保存根目录",
+                        display_name="保存根目录",
                         default="",
                         tooltip="保存的根目录，例如 ~/Downloads/修复结果",
                     ),
                     io.String.Input(
                         "relative_dir",
-                        display_name="📂 相对子目录",
+                        display_name="相对子目录",
                         default="",
                         optional=True,
                         tooltip="相对子目录（接加载器的 📂相对子目录，保留原结构），可留空",
                     ),
                     io.String.Input(
                         "filename",
-                        display_name="📝 文件名",
+                        display_name="文件名",
                         default="",
                         optional=True,
                         tooltip="文件名（不含扩展名，接加载器的 📝文件名）；留空则用时间戳",
                     ),
                     io.String.Input(
                         "filename_prefix",
-                        display_name="🏷️ 文件名前缀",
+                        display_name="文件名前缀",
                         default="",
                         optional=True,
                         tooltip="文件名前缀，可留空",
                     ),
                     io.String.Input(
                         "filename_suffix",
-                        display_name="🏷️ 文件名后缀",
+                        display_name="文件名后缀",
                         default="",
                         optional=True,
                         tooltip="文件名后缀，例如 _修复，可留空",
                     ),
                     io.Combo.Input(
                         "image_format",
-                        display_name="🖼️ 保存格式",
+                        display_name="保存格式",
                         options=["png", "jpg", "webp"],
                         default="png",
                         tooltip="保存格式",
                     ),
                     io.Int.Input(
                         "quality",
-                        display_name="✨ 图片质量",
+                        display_name="图片质量",
                         default=95,
                         min=1,
                         max=100,
@@ -412,13 +412,13 @@ if _HAS_V3:
                     ),
                     io.Boolean.Input(
                         "overwrite",
-                        display_name="♻️ 覆盖同名",
+                        display_name="覆盖同名",
                         default=False,
                         tooltip="同名文件是否覆盖；关闭时自动加 _1 _2 ... 避免覆盖",
                     ),
                 ],
                 outputs=[
-                    io.String.Output(display_name="💾 已保存路径"),
+                    io.String.Output(display_name="已保存路径"),
                 ],
                 is_output_node=True,
             )
