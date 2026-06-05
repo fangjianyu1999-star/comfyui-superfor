@@ -64,6 +64,22 @@ def _expand_dir(directory: str) -> str:
     return os.path.normpath(os.path.abspath(os.path.expanduser(os.path.expandvars(d))))
 
 
+def _normalize_relative_dir(relative_dir: str) -> str:
+    """规范化相对子目录；误接「相对路径」（含文件名）时自动只保留目录部分。"""
+    rel = (relative_dir or "").strip().strip("/\\")
+    if not rel:
+        return ""
+    base = os.path.basename(rel)
+    if os.path.splitext(base)[1].lower() in IMAGE_EXTS:
+        log.warning(
+            "[SuperFor_SaveImageToDir] 「相对子目录」收到了文件路径（%s），"
+            "已自动改为目录部分。请改接循环开始节点的「相对子目录」，不要接「相对路径」。",
+            relative_dir,
+        )
+        rel = os.path.dirname(rel)
+    return rel.strip("/\\")
+
+
 def _is_under_root(root: str, target: str) -> bool:
     """判断 target 是否在 root 之下（兼容 Windows 不同盘符）。"""
     root_n = os.path.normcase(os.path.normpath(root))
@@ -433,7 +449,7 @@ if _HAS_V3:
 
                 root = _expand_dir(output_root)
                 # 防止 relative_dir 里的绝对路径 / .. 越权写到根目录之外
-                rel = (relative_dir or "").strip().strip("/\\")
+                rel = _normalize_relative_dir(relative_dir)
                 target_dir = os.path.normpath(os.path.join(root, rel))
                 if not _is_under_root(root, target_dir):
                     log.warning("[SuperFor_SaveImageToDir] relative_dir 越权，已忽略：%s", relative_dir)

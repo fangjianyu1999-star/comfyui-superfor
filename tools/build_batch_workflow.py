@@ -89,8 +89,8 @@ def widget_in(name: str, type_: str) -> dict:
 
 
 # 用户可按需修改的默认路径
-SRC_DIR = "/Users/ikun/Desktop/暗暗"
-OUT_DIR = "/Users/ikun/Desktop/结果保存测试"
+SRC_DIR = "/Users/ikun/Downloads/16岁"
+OUT_DIR = "/Users/ikun/Downloads/xf"
 
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif")
 
