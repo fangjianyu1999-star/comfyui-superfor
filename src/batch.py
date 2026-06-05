@@ -434,7 +434,9 @@ if _HAS_V3:
                 outputs=[
                     io.String.Output(display_name="已保存路径"),
                 ],
-                is_output_node=True,
+                # 不可设为 output：循环子图每次展开都会把 OUTPUT 节点重新加入队列，导致同一张重复保存 N 次。
+                # 预览由 execute 返回的 ui.PreviewImage 提供；队列出口只用「批量循环-结束」。
+                is_output_node=False,
             )
 
         @classmethod
@@ -455,9 +457,23 @@ if _HAS_V3:
                 os.makedirs(target_dir, exist_ok=True)
 
                 ext = {"png": ".png", "jpg": ".jpg", "webp": ".webp"}[image_format]
-                # 防止 widgets_values 错位时把 quality/overwrite 塞进前后缀
-                prefix = filename_prefix if isinstance(filename_prefix, str) else ""
-                suffix = filename_suffix if isinstance(filename_suffix, str) else ""
+                def _safe_affix(value: object, *, role: str) -> str:
+                    """过滤 widgets_values 错位产生的 95 / True 等非法前后缀。"""
+                    if not isinstance(value, str):
+                        return ""
+                    s = value.strip()
+                    if not s:
+                        return ""
+                    if s.lower() in {"true", "false"}:
+                        log.warning("[SuperFor_SaveImageToDir] 忽略非法%s（布尔串 %r）", role, s)
+                        return ""
+                    if s.isdigit():
+                        log.warning("[SuperFor_SaveImageToDir] 忽略非法%s（数字 %r）", role, s)
+                        return ""
+                    return s
+
+                prefix = _safe_affix(filename_prefix, role="前缀")
+                suffix = _safe_affix(filename_suffix, role="后缀")
                 base_name = (filename or "").strip() if isinstance(filename, str) else ""
                 if not base_name:
                     import time

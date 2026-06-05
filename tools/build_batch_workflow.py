@@ -115,7 +115,8 @@ LOADER_WIDGETS = [SRC_DIR, "single", 0, True, "name", ""]
 LOADER_WIDGETS_AQ = [SRC_DIR, "incremental", 0, True, "name", ""]
 COUNT_WIDGETS = [SRC_DIR, True, ""]
 I2I_WIDGETS = ["", "", "", 1024, 1024, 1]  # prompt, image_url, negative_prompt, width, height, batch_size
-SAVER_WIDGETS = [OUT_DIR, "", "", "", "_修复", "png", 95, True]  # 覆盖同名：避免重跑堆 _1 _2
+# 顺序须与 object_info 一致：output_root, relative_dir, filename, image_format, quality, overwrite, [prefix, suffix]
+SAVER_WIDGETS = [OUT_DIR, "", "", "png", 95, True, "", "_修复"]
 LOADER_WIDGETS_LOOP = [SRC_DIR, "single", 0, True, "name", ""]  # 指定序号，index 由循环开始节点喂入
 # ImageScale: upscale_method, width, height(0=按比例), crop
 PREVIEW_SCALE_WIDGETS = ["lanczos", 1280, 0, "disabled"]
