@@ -3,7 +3,7 @@
 ComfyUI **批处理 / 自动循环**节点包。把"一个文件夹（可含多层子文件夹）里的图片逐张送进任意工作流，结果按**原目录结构 + 原文件名**保存"这件事变成几个节点就能搞定，并且**点一次「运行」就自动跑完整个文件夹**（无需手动开 Auto Queue、无需手填图片数量）。
 
 > 本包从 `ComfyUI-CompanyAPI` 中独立出来，专注批处理，便于单独管理与更新。
-> 节点内部 ID 统一为 `SuperFor_*`（循环节点仍兼容旧名 `Aiaiartist_*` 工作流）。
+> 节点内部 ID 统一为 `SuperFor_*`。
 
 ## ✨ 节点一览（菜单分类：`🔁 SuperFor/批量`）
 
@@ -46,7 +46,7 @@ python tools/build_batch_workflow.py
 
 ## 📌 备注
 
-节点内部 ID 为 `SuperFor_*`（如 `SuperFor_DirForLoopStart`）。循环节点仍注册 `Aiaiartist_*` 别名以兼容旧工作流，建议重新导入 `tools/build_batch_workflow.py` 生成的新版工作流。
+节点内部 ID 为 `SuperFor_*`（如 `SuperFor_DirForLoopStart`）。若旧工作流里还是 `Aiaiartist_*` 节点，请重新导入 `tools/build_batch_workflow.py` 生成的新版工作流。
 
 ## 界面乱码（Windows 常见）
 

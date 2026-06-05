@@ -310,15 +310,10 @@ if _HAS_GRAPH:
     NODE_CLASS_MAPPINGS = {
         "SuperFor_DirForLoopStart": DirForLoopStart,
         "SuperFor_DirForLoopEnd": DirForLoopEnd,
-        # 兼容旧工作流（右键仍可能显示旧名，建议重新导入 SuperFor_ 版工作流）
-        "Aiaiartist_DirForLoopStart": DirForLoopStart,
-        "Aiaiartist_DirForLoopEnd": DirForLoopEnd,
     }
     NODE_DISPLAY_NAME_MAPPINGS = {
         "SuperFor_DirForLoopStart": "批量循环-开始（自动计数）",
         "SuperFor_DirForLoopEnd": "批量循环-结束",
-        "Aiaiartist_DirForLoopStart": "批量循环-开始（自动计数）",
-        "Aiaiartist_DirForLoopEnd": "批量循环-结束",
     }
 else:  # pragma: no cover
     NODE_CLASS_MAPPINGS = {}
