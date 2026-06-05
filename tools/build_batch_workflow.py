@@ -205,7 +205,7 @@ def build_dir_loop() -> dict:
     start = wf.add(
         "SuperFor_DirForLoopStart", (40, 60), (320, 200),
         title="① 批量循环-开始（自动计数）",
-        widgets=[SRC_DIR, True, "按路径名", "", 0],  # 最后一项：运行批次，重跑时 +1
+        widgets=[SRC_DIR, True, "按路径名", 0, False, ""],  # 运行批次、强制重跑、筛选
         inputs=[],
         outputs=[
             out("循环流程", LINK_TYPE_FLOW),

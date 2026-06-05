@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Any
 
 from .batch import (
     SORT_MTIME,
@@ -153,6 +154,20 @@ def _loop_index_changed(**kwargs) -> int:
         return 0
 
 
+def _start_is_changed(**kwargs) -> Any:
+    """跨队列重跑：强制重跑 / 运行批次>0 时必须整图失效（否则 0.00 秒缓存）。"""
+    force = _pick(kwargs, "强制重跑", "force_rerun", default=False)
+    if force is True:
+        return float("nan")
+    try:
+        run_batch = int(_pick(kwargs, "运行批次", "run_batch", default=0) or 0)
+    except (TypeError, ValueError):
+        run_batch = 0
+    if run_batch > 0:
+        return (run_batch, float("nan"))
+    return _loop_index_changed(**kwargs)
+
+
 class DirForLoopStart:
     """SuperFor 批量循环-开始（自动递归计数）
 
@@ -169,18 +184,25 @@ class DirForLoopStart:
                 "文件夹路径": ("STRING", {"default": "", "tooltip": "根文件夹，支持 ~，会自动递归子文件夹"}),
                 "含子文件夹": ("BOOLEAN", {"default": True, "tooltip": "是否递归子文件夹"}),
                 "排序方式": (["按路径名", "按修改时间"], {"default": "按路径名"}),
-            },
-            "optional": {
-                "文件名筛选": ("STRING", {"default": "", "tooltip": "只加载文件名含该关键字的图片，可留空"}),
                 "运行批次": (
                     "INT",
                     {
                         "default": 0,
                         "min": 0,
                         "max": 999999,
-                        "tooltip": "同一文件夹想再跑一遍时改为 1、2、3…（用于清除 ComfyUI 缓存，否则会 0.00 秒秒完成）",
+                        "tooltip": "同一文件夹想再跑一遍时改为 1、2、3…",
                     },
                 ),
+                "强制重跑": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                        "tooltip": "勾上再点 Queue，可清除缓存真正重跑（跑完记得取消勾选）",
+                    },
+                ),
+            },
+            "optional": {
+                "文件名筛选": ("STRING", {"default": "", "tooltip": "只加载文件名含该关键字的图片，可留空"}),
             },
             "hidden": {
                 "initial_value0": (any_type,),
@@ -197,13 +219,20 @@ class DirForLoopStart:
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
+        return _start_is_changed(**kwargs)
+
+    def start(self, **kwargs):
+        force = _pick(kwargs, "强制重跑", "force_rerun", default=False)
         try:
             run_batch = int(_pick(kwargs, "运行批次", "run_batch", default=0) or 0)
         except (TypeError, ValueError):
             run_batch = 0
-        return (run_batch, _loop_index_changed(**kwargs))
+        if force or run_batch > 0:
+            log.info(
+                "[SuperFor_DirForLoopStart] 强制重跑已开启 run_batch=%s force=%s",
+                run_batch, force,
+            )
 
-    def start(self, **kwargs):
         directory = _pick(kwargs, "文件夹路径", "directory", "📁 文件夹路径", default="")
         include_subdir = _pick(kwargs, "含子文件夹", "include_subdir", "📂 含子文件夹", default=True)
         sort = _normalize_sort(_pick(kwargs, "排序方式", "sort", "↕️ 排序方式", default=SORT_NAME))

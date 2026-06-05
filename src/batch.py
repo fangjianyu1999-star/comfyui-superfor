@@ -456,6 +456,22 @@ if _HAS_V3:
             )
 
         @classmethod
+        def fingerprint_inputs(
+            cls,
+            images,
+            output_root,
+            relative_dir="",
+            filename="",
+            filename_prefix="",
+            filename_suffix="",
+            image_format="png",
+            quality=95,
+            overwrite=False,
+        ) -> Any:
+            # 保存节点必须每轮真正写盘；否则跨队列重跑会 0.00 秒跳过
+            return float("nan")
+
+        @classmethod
         def execute(cls, images, output_root, relative_dir="", filename="",
                     filename_prefix="", filename_suffix="", image_format="png",
                     quality=95, overwrite=False):
