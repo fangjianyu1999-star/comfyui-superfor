@@ -143,7 +143,7 @@ def build_for_loop() -> dict:
     )
 
     loader = wf.add(
-        "Aiaiartist_LoadImageBatch", (40, 220), (320, 280),
+        "SuperFor_LoadImageBatch", (40, 220), (320, 280),
         title="② 批量遍历加载（指定序号）",
         widgets=list(LOADER_WIDGETS),
         inputs=[widget_in("index", LINK_TYPE_INT)],
@@ -159,7 +159,7 @@ def build_for_loop() -> dict:
     )
 
     saver = wf.add(
-        "Aiaiartist_SaveImageToDir", (800, 220), (320, 300),
+        "SuperFor_SaveImageToDir", (800, 220), (320, 300),
         title="④ 按路径保存",
         widgets=list(SAVER_WIDGETS),
         inputs=[
@@ -198,7 +198,7 @@ def build_dir_loop() -> dict:
     wf = WF()
 
     start = wf.add(
-        "Aiaiartist_DirForLoopStart", (40, 60), (320, 200),
+        "SuperFor_DirForLoopStart", (40, 60), (320, 200),
         title="① 批量循环-开始（自动递归计数）",
         widgets=[SRC_DIR, True, "按路径名", ""],  # directory, include_subdir, sort, filter_keyword
         inputs=[],
@@ -222,7 +222,7 @@ def build_dir_loop() -> dict:
     )
 
     saver = wf.add(
-        "Aiaiartist_SaveImageToDir", (800, 60), (320, 300),
+        "SuperFor_SaveImageToDir", (800, 60), (320, 300),
         title="③ 按路径保存",
         widgets=list(SAVER_WIDGETS),
         inputs=[
@@ -234,7 +234,7 @@ def build_dir_loop() -> dict:
     )
 
     end = wf.add(
-        "Aiaiartist_DirForLoopEnd", (800, 420), (300, 110),
+        "SuperFor_DirForLoopEnd", (800, 420), (300, 110),
         title="④ 批量循环-结束",
         widgets=[],
         inputs=[
@@ -258,7 +258,7 @@ def build_auto_queue() -> dict:
     wf = WF()
 
     loader = wf.add(
-        "Aiaiartist_LoadImageBatch", (40, 60), (320, 280),
+        "SuperFor_LoadImageBatch", (40, 60), (320, 280),
         title="① 批量遍历加载（逐张）",
         widgets=list(LOADER_WIDGETS_AQ),
         inputs=[],
@@ -274,7 +274,7 @@ def build_auto_queue() -> dict:
     )
 
     saver = wf.add(
-        "Aiaiartist_SaveImageToDir", (800, 60), (320, 300),
+        "SuperFor_SaveImageToDir", (800, 60), (320, 300),
         title="③ 按路径保存",
         widgets=list(SAVER_WIDGETS),
         inputs=[

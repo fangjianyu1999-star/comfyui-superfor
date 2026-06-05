@@ -11,8 +11,8 @@
 （`easy whileLoopStart/whileLoopEnd/mathInt/compare`），仅把「读 total 字面值」
 换成「在 Python 里递归统计目录图片数」（仍是字面整数，规避连线问题）：
 
-- Aiaiartist_DirForLoopStart  批量循环-开始（自动递归计数 + 直接输出当前图）
-- Aiaiartist_DirForLoopEnd    批量循环-结束
+- SuperFor_DirForLoopStart  批量循环-开始（自动递归计数 + 直接输出当前图）
+- SuperFor_DirForLoopEnd    批量循环-结束
 
 ⚠ 依赖：需要安装 comfyui-easy-use（提供底层 whileLoop / mathInt / compare 节点）。
 """
@@ -33,6 +33,12 @@ from .utils import make_error_image, pil_to_comfy_tensor
 log = logging.getLogger("comfyui-superfor")
 
 MAX_FLOW_NUM = 20  # 与 easy-use 保持一致
+
+# 批量循环-开始节点在 prompt 里的 class_type（含旧名兼容）
+_LOOP_START_TYPES = frozenset({
+    "SuperFor_DirForLoopStart",
+    "Aiaiartist_DirForLoopStart",
+})
 
 
 class AlwaysEqualProxy(str):
@@ -73,6 +79,15 @@ except Exception:  # noqa: BLE001  # pragma: no cover
     _HAS_GRAPH = False
 
 
+def _read_start_widget_inputs(inputs: dict) -> tuple[str, bool, str, str]:
+    """从批量循环-开始节点的 inputs 读取目录参数（兼容中英文键名）。"""
+    directory = inputs.get("📁 文件夹路径", inputs.get("directory", ""))
+    include_subdir = inputs.get("📂 含子文件夹", inputs.get("include_subdir", True))
+    filter_keyword = inputs.get("🔍 文件名筛选", inputs.get("filter_keyword", ""))
+    sort = inputs.get("↕️ 排序方式", inputs.get("sort", SORT_NAME))
+    return directory, include_subdir, filter_keyword, sort
+
+
 def _count_recursive(directory, include_subdir, filter_keyword, sort) -> int:
     """递归统计目录图片数（字面整数）。参数可能来自原始 prompt，做容错。"""
     if not isinstance(directory, str):
@@ -86,8 +101,62 @@ def _count_recursive(directory, include_subdir, filter_keyword, sort) -> int:
     return max(1, len(_scan_images(root, sub, kw, sm)))
 
 
+def _parse_literal_int(value) -> int | None:
+    """把 whileLoopStart 的 condition 等字面值解析为整数。"""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def _find_loop_start_inputs(dynprompt, while_open_id) -> dict | None:
+    """通过 dynprompt 找到配对的「批量循环-开始」节点 inputs。"""
+    if dynprompt is None:
+        return None
+    try:
+        real_id = dynprompt.get_real_node_id(str(while_open_id))
+        node = dynprompt.get_node(real_id)
+        if node.get("class_type") in _LOOP_START_TYPES:
+            return node.get("inputs", {})
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        for nid, node in dynprompt.get_original_prompt().items():
+            if node.get("class_type") in _LOOP_START_TYPES:
+                return node.get("inputs", {})
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _resolve_total(dynprompt, while_open_id) -> int:
+    """解析循环总次数：优先读 whileLoopStart.condition，再回退到开始节点目录统计。"""
+    if dynprompt is not None:
+        try:
+            while_node = dynprompt.get_node(while_open_id)
+            cond = _parse_literal_int(while_node.get("inputs", {}).get("condition"))
+            if cond is not None and cond > 0:
+                return cond
+        except Exception as e:  # noqa: BLE001
+            log.debug("[SuperFor_DirForLoopEnd] 读取 whileLoopStart.condition 失败：%s", e)
+
+    start_inputs = _find_loop_start_inputs(dynprompt, while_open_id)
+    if start_inputs:
+        directory, include_subdir, filter_keyword, sort = _read_start_widget_inputs(start_inputs)
+        return _count_recursive(directory, include_subdir, filter_keyword, sort)
+
+    log.warning("[SuperFor_DirForLoopEnd] 无法解析循环总数，回退为 1")
+    return 1
+
+
 class DirForLoopStart:
-    """aiaiartist 批量循环-开始（自动递归计数）
+    """SuperFor 批量循环-开始（自动递归计数）
 
     指定一个文件夹（可含多层子文件夹），自动统计图片总数并逐张循环，
     每轮直接输出当前图片及其文件名 / 相对子目录，无需单独的加载器或手填总量。
@@ -118,6 +187,14 @@ class DirForLoopStart:
     FUNCTION = "start"
     CATEGORY = "🔁 SuperFor/批量"
 
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        # 循环序号变化时必须重新执行，否则会缓存第 0 张图导致同一张反复处理
+        try:
+            return int(kwargs.get("initial_value0", 0) or 0)
+        except (TypeError, ValueError):
+            return float("nan")
+
     def start(self, **kwargs):
         directory = kwargs.get("📁 文件夹路径", "")
         include_subdir = kwargs.get("📂 含子文件夹", True)
@@ -142,7 +219,7 @@ class DirForLoopStart:
             relative_path = os.path.relpath(src, root)
             relative_dir = os.path.dirname(relative_path)
             filename = os.path.splitext(os.path.basename(src))[0]
-            log.info("[Aiaiartist_DirForLoopStart] %d/%d -> %s", idx + 1, total, relative_path)
+            log.info("[SuperFor_DirForLoopStart] %d/%d -> %s", idx + 1, total, relative_path)
 
         graph = GraphBuilder()
         graph.node("easy whileLoopStart", condition=max(1, total), initial_value0=i)
@@ -153,10 +230,10 @@ class DirForLoopStart:
 
 
 class DirForLoopEnd:
-    """aiaiartist 批量循环-结束
+    """SuperFor 批量循环-结束
 
-    与「批量循环-开始」配对。内部递归统计开始节点指定目录的图片数作为循环上限，
-    把要进入循环体的结果（如保存节点的 saved_paths）接到本节点的 初始值1。
+    与「批量循环-开始」配对。内部读取循环总数并控制展开，
+    把要进入循环体的结果（如保存节点的 saved_paths）接到本节点的 🔗 循环体回接。
     """
 
     @classmethod
@@ -189,6 +266,12 @@ class DirForLoopEnd:
     # 关键：标记为输出节点，否则 GUI 点「运行」时本节点不会被执行，循环不会展开（只跑一次）
     OUTPUT_NODE = True
 
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        # 循环体回接内容每轮不同，避免结束节点被错误缓存
+        anchor = kwargs.get("🔗 循环体回接", kwargs.get("initial_value1", ""))
+        return str(anchor)
+
     def end(self, dynprompt=None, extra_pnginfo=None, unique_id=None, **kwargs):
         # 兼容旧工作流：新键名优先，回退到旧英文键名
         flow = kwargs.get("🔁 循环流程", kwargs.get("flow"))
@@ -196,20 +279,7 @@ class DirForLoopEnd:
 
         graph = GraphBuilder()
         while_open = flow[0]
-
-        # 从开始节点读取目录参数（widget → 字面值），递归统计总数（字面整数，规避连线问题）
-        total = 1
-        try:
-            forstart = dynprompt.get_node(while_open)
-            inputs = forstart.get("inputs", {})
-            total = _count_recursive(
-                inputs.get("📁 文件夹路径", inputs.get("directory", "")),
-                inputs.get("📂 含子文件夹", inputs.get("include_subdir", True)),
-                inputs.get("🔍 文件名筛选", inputs.get("filter_keyword", "")),
-                inputs.get("↕️ 排序方式", inputs.get("sort", SORT_NAME)),
-            )
-        except Exception as e:  # noqa: BLE001
-            log.warning("[Aiaiartist_DirForLoopEnd] 统计总数失败，回退为 1：%s", e)
+        total = _resolve_total(dynprompt, while_open)
 
         sub = graph.node("easy mathInt", operation="add", a=[while_open, 1], b=1)
         cond = graph.node("easy compare", a=sub.out(0), b=total, comparison="a < b")
@@ -228,14 +298,19 @@ class DirForLoopEnd:
 
 if _HAS_GRAPH:
     NODE_CLASS_MAPPINGS = {
+        "SuperFor_DirForLoopStart": DirForLoopStart,
+        "SuperFor_DirForLoopEnd": DirForLoopEnd,
+        # 兼容旧工作流（右键仍可能显示旧名，建议重新导入 SuperFor_ 版工作流）
         "Aiaiartist_DirForLoopStart": DirForLoopStart,
         "Aiaiartist_DirForLoopEnd": DirForLoopEnd,
     }
     NODE_DISPLAY_NAME_MAPPINGS = {
+        "SuperFor_DirForLoopStart": "🔄 批量循环-开始（自动计数）",
+        "SuperFor_DirForLoopEnd": "🏁 批量循环-结束",
         "Aiaiartist_DirForLoopStart": "🔄 批量循环-开始（自动计数）",
         "Aiaiartist_DirForLoopEnd": "🏁 批量循环-结束",
     }
 else:  # pragma: no cover
     NODE_CLASS_MAPPINGS = {}
     NODE_DISPLAY_NAME_MAPPINGS = {}
-    log.warning("[ComfyUI-CompanyAPI] 未找到 comfy_execution.graph_utils，循环节点不可用")
+    log.warning("[comfyui-superfor] 未找到 comfy_execution.graph_utils，循环节点不可用")

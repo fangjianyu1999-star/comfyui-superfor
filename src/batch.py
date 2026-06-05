@@ -61,7 +61,17 @@ _CURSORS: dict[str, dict[str, int]] = {}
 def _expand_dir(directory: str) -> str:
     """把用户输入的目录展开成绝对路径（支持 ~ 和环境变量）。"""
     d = (directory or "").strip().strip('"').strip("'")
-    return os.path.abspath(os.path.expanduser(os.path.expandvars(d)))
+    return os.path.normpath(os.path.abspath(os.path.expanduser(os.path.expandvars(d))))
+
+
+def _is_under_root(root: str, target: str) -> bool:
+    """判断 target 是否在 root 之下（兼容 Windows 不同盘符）。"""
+    root_n = os.path.normcase(os.path.normpath(root))
+    target_n = os.path.normcase(os.path.normpath(target))
+    try:
+        return os.path.commonpath([root_n, target_n]) == root_n
+    except ValueError:
+        return False
 
 
 def _scan_images(root: str, include_subdir: bool, keyword: str, sort_mode: str) -> list[str]:
@@ -90,7 +100,7 @@ def _scan_images(root: str, include_subdir: bool, keyword: str, sort_mode: str) 
         files.sort(key=lambda p: (os.path.getmtime(p), p.lower()))
     else:
         # 按相对路径名排序，保证「文件1、文件2、文件3」这种顺序稳定
-        files.sort(key=lambda p: p.lower())
+        files.sort(key=lambda p: os.path.normcase(p))
 
     return files
 
@@ -135,7 +145,7 @@ if _HAS_V3:
         @classmethod
         def define_schema(cls) -> io.Schema:
             return io.Schema(
-                node_id="Aiaiartist_LoadImageBatch",
+                node_id="SuperFor_LoadImageBatch",
                 display_name="📥 批量遍历加载",
                 category=CATEGORY_BATCH,
                 description=(
@@ -262,7 +272,7 @@ if _HAS_V3:
                     total,
                 )
             except Exception as e:  # noqa: BLE001
-                log.exception("[Aiaiartist_LoadImageBatch] 失败")
+                log.exception("[SuperFor_LoadImageBatch] 失败")
                 return io.NodeOutput(
                     make_error_image(pretty_error("批量加载失败", e)),
                     "", "", "", "", 0, 0,
@@ -282,7 +292,7 @@ if _HAS_V3:
         @classmethod
         def define_schema(cls) -> io.Schema:
             return io.Schema(
-                node_id="Aiaiartist_CountImagesInDir",
+                node_id="SuperFor_CountImagesInDir",
                 display_name="🔢 目录图片计数",
                 category=CATEGORY_BATCH,
                 description=(
@@ -320,10 +330,10 @@ if _HAS_V3:
         def execute(cls, directory, include_subdir=True, filter_keyword=""):
             root = _expand_dir(directory)
             if not os.path.isdir(root):
-                log.warning("[Aiaiartist_CountImagesInDir] 目录不存在：%s", root)
+                log.warning("[SuperFor_CountImagesInDir] 目录不存在：%s", root)
                 return io.NodeOutput(0)
             total = len(_scan_images(root, include_subdir, filter_keyword, SORT_NAME))
-            log.info("[Aiaiartist_CountImagesInDir] %s 共 %d 张", root, total)
+            log.info("[SuperFor_CountImagesInDir] %s 共 %d 张", root, total)
             return io.NodeOutput(total)
 
     class SaveImageToDirV3(io.ComfyNode):
@@ -337,7 +347,7 @@ if _HAS_V3:
         @classmethod
         def define_schema(cls) -> io.Schema:
             return io.Schema(
-                node_id="Aiaiartist_SaveImageToDir",
+                node_id="SuperFor_SaveImageToDir",
                 display_name="💾 按路径保存",
                 category=CATEGORY_BATCH,
                 description=(
@@ -425,8 +435,8 @@ if _HAS_V3:
                 # 防止 relative_dir 里的绝对路径 / .. 越权写到根目录之外
                 rel = (relative_dir or "").strip().strip("/\\")
                 target_dir = os.path.normpath(os.path.join(root, rel))
-                if os.path.commonpath([root, target_dir]) != root:
-                    log.warning("[Aiaiartist_SaveImageToDir] relative_dir 越权，已忽略：%s", relative_dir)
+                if not _is_under_root(root, target_dir):
+                    log.warning("[SuperFor_SaveImageToDir] relative_dir 越权，已忽略：%s", relative_dir)
                     target_dir = root
                 os.makedirs(target_dir, exist_ok=True)
 
@@ -462,14 +472,15 @@ if _HAS_V3:
                         save_img.save(out_path, format="WEBP", quality=quality)
 
                     saved.append(out_path)
-                    log.info("[Aiaiartist_SaveImageToDir] 已保存 %s", out_path)
+                    log.info("[SuperFor_SaveImageToDir] 已保存 %s", out_path)
 
                 result = "\n".join(saved)
                 return io.NodeOutput(result, ui=ui.PreviewImage(images, cls=cls))
             except Exception as e:  # noqa: BLE001
-                log.exception("[Aiaiartist_SaveImageToDir] 失败")
+                log.exception("[SuperFor_SaveImageToDir] 失败")
                 msg = pretty_error("保存失败", e)
-                return io.NodeOutput(msg, ui=ui.PreviewText(msg))
+                # 抛出异常以中断工作流并在 ComfyUI 界面显示红框错误（避免静默继续循环）
+                raise RuntimeError(msg) from e
 
         @staticmethod
         def _dedupe(path: str) -> str:
