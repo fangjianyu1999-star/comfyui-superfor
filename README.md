@@ -1,63 +1,66 @@
-# comfyui-superfor 🔁
+# comfyui-superfor
 
-ComfyUI **批处理 / 自动循环**节点包。把"一个文件夹（可含多层子文件夹）里的图片逐张送进任意工作流，结果按**原目录结构 + 原文件名**保存"这件事变成几个节点就能搞定，并且**点一次「运行」就自动跑完整个文件夹**（无需手动开 Auto Queue、无需手填图片数量）。
+ComfyUI **批处理 / 自动循环**节点包：把一个文件夹（可含多层子目录）里的图片逐张送进工作流，结果按**原目录结构 + 原文件名**保存；**点一次「运行」**即可跑完全部（无需手填张数、无需 Auto Queue 逐张排队）。
 
-> 本包从 `ComfyUI-CompanyAPI` 中独立出来，专注批处理，便于单独管理与更新。
-> 节点内部 ID 统一为 `SuperFor_*`。
+> 本包从 `ComfyUI-CompanyAPI` 中独立出来。节点内部 `class_type` 统一为 `SuperFor_*`。
 
-## ✨ 节点一览（菜单分类：`🔁 SuperFor/批量`）
+## 节点一览（菜单：`SuperFor/批量`）
 
 | 节点 | 作用 |
 | --- | --- |
-| 🔄 批量循环-开始（自动计数） | 指定一个文件夹，自动递归统计图片数并逐张循环，直接输出当前图片 + 文件名 + 相对子目录 |
-| 🏁 批量循环-结束 | 与"开始"配对。把保存节点的「💾 已保存路径」接到 `🔗 循环体回接`，循环即自动跑完所有图 |
-| 📥 批量遍历加载 | 递归扫描文件夹逐张加载（配合 Auto Queue 使用的另一种方案） |
-| 💾 按路径保存 | 按"根目录 / 相对子目录 / 文件名"保存，自动保留原结构 |
-| 🔢 目录图片计数 | 递归统计文件夹图片总数，输出整数 |
+| **批量循环-开始**（`SuperFor_DirForLoopStart`） | 指定根目录，递归统计张数并驱动循环；输出当前图及路径信息 |
+| **批量循环-结束**（`SuperFor_DirForLoopEnd`） | 与开始配对；`已保存路径` 必须接 `循环体回接` |
+| **批量遍历加载**（`SuperFor_LoadImageBatch`） | 递归扫描，逐张或按序号取图（配合 Auto Queue 的另一种方案） |
+| **按路径保存**（`SuperFor_SaveImageToDir`） | 保存到 `根目录/相对子目录/文件名` |
+| **目录图片计数**（`SuperFor_CountImagesInDir`） | 递归统计图片数，可接 easy-use For 循环的 `total` 字面值 |
+| **文件夹批量导出**（`SuperFor_BatchFolderExport`） | 单节点内 Python 循环：缩放/复制整夹，不经图展开 |
+| **批量循环-内部结束**（`SuperFor_WhileLoopEnd`） | 内部用，勿手动添加 |
 
-## 🧩 推荐接法（自动循环 · 点一次跑完）
+依赖：[comfyui-easy-use](https://github.com/yolain/ComfyUI-Easy-Use)（提供 `easy whileLoopStart`、`easy mathInt`、`easy compare` 等）。
+
+## 推荐接法：自动循环（示例：`批量修复-自动循环.json`）
 
 ```
-🔄 批量循环-开始 ──🖼️图像──▶ [你的处理节点] ──▶ 💾 按路径保存
-        │                                              │
-        ├──📝文件名──────────────────────────────────▶│
-        ├──📂相对子目录──────────────────────────────▶│
-        └──🔁循环流程──▶ 🏁 批量循环-结束 ◀──💾已保存路径─┘
-                              （🔗 循环体回接）
+① 批量循环-开始
+   ├─ 图像 ──────────→ ② 处理 / 修复
+   ├─ 相对子目录 ─────→ ③ 按路径保存（与保存节点「相对子目录」上下对齐，线不交叉）
+   ├─ 文件名 ─────────→ ③ 按路径保存
+   └─ 循环流程 ───────→ ④ 批量循环-结束
+③ 已保存路径 ─────────→ ④ 循环体回接   ← 必须接，否则只跑一张
+④ 循环完成 ───────────→ ⑤ PreviewAny（完成出口，便于点「运行」）
 ```
 
 要点：
-- 「开始」的 `📁 文件夹路径` 填根目录（支持 `~`，自动递归子文件夹）。
-- 把保存节点的 `💾 已保存路径` 接到「结束」的 `🔗 循环体回接`——**这根线是关键**，不接的话只会跑一张。
-- 「结束」是输出节点，所以点一次「运行」就会自动展开循环、跑完整个文件夹。
 
-## 📦 依赖
+- **开始**的「文件夹路径」填源根目录（支持 `~`，递归子文件夹由「含子文件夹」控制）。
+- **字符串输出口顺序**为：`相对子目录` → `文件名` → `相对路径`，与 **按路径保存** 的 `相对子目录`、`文件名` 输入顺序一致，直连不交叉。
+- **④ 结束**不是输出节点；**⑤ PreviewAny** 接在循环外，作为队列出口（避免循环展开时 OUTPUT 被反复入队）。
+- 换源文件夹或源目录内增删图后，**开始**节点会根据目录指纹自动失效缓存，一般无需 `--cache-none`。
 
-- ComfyUI（提供 torch / numpy / Pillow）
-- [comfyui-easy-use](https://github.com/yolain/ComfyUI-Easy-Use)（提供底层 `whileLoop / mathInt / compare` 节点）
+## 单节点整夹导出
 
-## 🛠️ 生成示例工作流
+`批量修复-批量导出.json`：仅 **文件夹批量导出**，适合「只要缩放/复制到另一目录」、中间不接其它图节点。
+
+## 生成桌面示例工作流
 
 ```bash
-python tools/build_batch_workflow.py
+cd /path/to/ComfyUI
+source venv/bin/activate
+python custom_nodes/comfyui-superfor/tools/build_batch_workflow.py
 ```
 
-会在桌面生成 `批量修复-自动循环.json`（自动循环版）和 `批量修复-AutoQueue.json`（Auto Queue 版）。
+会在桌面生成：
 
-## 📌 备注
+- `批量修复-自动循环.json`
+- `批量修复-AutoQueue.json`
+- `批量修复-批量导出.json`
 
-节点内部 ID 为 `SuperFor_*`（如 `SuperFor_DirForLoopStart`）。若旧工作流里还是 `Aiaiartist_*` 节点，请重新导入 `tools/build_batch_workflow.py` 生成的新版工作流。
+## 旧工作流 / 旧节点名
 
-## 界面乱码（Windows 常见）
+若 JSON 里仍是 `Aiaiartist_*` 循环节点，请用上面脚本重新生成或对照本 README 改 `class_type`。
 
-若节点标题/参数出现 `åæ'è` 这类乱码，通常是 **UTF-8 中文被错误解码**（旧版把 emoji+中文写进了 V1 端口名）。
+若旧图里「开始 → 保存」两根线按**旧端口顺序**（先文件名后目录）连接，更新节点后请 **删线重连** 或重新 Load 新版 JSON。
 
-当前版本已改为：
-- **端口名 / 参数键**：英文 ASCII（`flow`、`directory`、`loop_anchor`）
-- **节点显示名**：纯中文、无 emoji（`批量循环-开始`）
-- **工作流 JSON**：`utf-8` 保存（`ensure_ascii=False`）
+## Windows 乱码
 
-Windows 用户请确保：
-1. `git pull` 更新到最新版后 **重启 ComfyUI**
-2. **重新导入** `批量修复-自动循环.json`（不要用旧工作流）
-3. 若仍有乱码，启动前设置环境变量：`set PYTHONUTF8=1`（CMD）或 `$env:PYTHONUTF8=1`（PowerShell）
+若标题/参数出现 `åæ'è` 等，多为 UTF-8 被误解码。请 `git pull` 后重启 ComfyUI，并重新导入 JSON；必要时设置 `PYTHONUTF8=1` 再启动。
