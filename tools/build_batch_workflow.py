@@ -200,16 +200,16 @@ def build_dir_loop() -> dict:
     start = wf.add(
         "SuperFor_DirForLoopStart", (40, 60), (320, 200),
         title="① 批量循环-开始（自动递归计数）",
-        widgets=[SRC_DIR, True, "name", ""],  # directory, include_subdir, sort, filter_keyword
+        widgets=[SRC_DIR, True, "按路径名", ""],  # 文件夹路径, 含子文件夹, 排序方式, 文件名筛选
         inputs=[],
         outputs=[
-            out("flow", LINK_TYPE_FLOW),
-            out("index", LINK_TYPE_INT),
-            out("image", LINK_TYPE_IMAGE),
-            out("filename", LINK_TYPE_STRING),
-            out("relative_dir", LINK_TYPE_STRING),
-            out("relative_path", LINK_TYPE_STRING),
-            out("total", LINK_TYPE_INT),
+            out("循环流程", LINK_TYPE_FLOW),
+            out("当前序号", LINK_TYPE_INT),
+            out("图像", LINK_TYPE_IMAGE),
+            out("文件名", LINK_TYPE_STRING),
+            out("相对子目录", LINK_TYPE_STRING),
+            out("相对路径", LINK_TYPE_STRING),
+            out("图片总数", LINK_TYPE_INT),
         ],
     )
 
@@ -238,18 +238,18 @@ def build_dir_loop() -> dict:
         title="④ 批量循环-结束",
         widgets=[],
         inputs=[
-            slot_in("flow", LINK_TYPE_FLOW),
-            slot_in("loop_anchor", LINK_TYPE_STRING),
+            slot_in("循环流程", LINK_TYPE_FLOW),
+            slot_in("循环体回接", LINK_TYPE_STRING),
         ],
-        outputs=[out("done", LINK_TYPE_STRING)],
+        outputs=[out("循环完成", LINK_TYPE_STRING)],
     )
 
-    wf.link(start, 0, end, 0, LINK_TYPE_FLOW)          # flow → 循环结束
+    wf.link(start, 0, end, 0, LINK_TYPE_FLOW)          # 循环流程 → 循环结束
     wf.link(start, 2, i2i, 0, LINK_TYPE_IMAGE)         # image → 修复
     wf.link(i2i, 0, saver, 0, LINK_TYPE_IMAGE)         # 修复 → 保存.images
     wf.link(start, 4, saver, 1, LINK_TYPE_STRING)      # relative_dir
     wf.link(start, 3, saver, 2, LINK_TYPE_STRING)      # filename
-    wf.link(saver, 0, end, 1, LINK_TYPE_STRING)        # saved_paths → 循环结束.loop_anchor（关键）
+    wf.link(saver, 0, end, 1, LINK_TYPE_STRING)        # saved_paths → 循环结束.循环体回接（关键）
 
     return wf.dump()
 
