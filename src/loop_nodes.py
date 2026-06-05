@@ -210,7 +210,16 @@ class DirForLoopStart:
             relative_path = os.path.relpath(src, root)
             relative_dir = os.path.dirname(relative_path)
             filename = os.path.splitext(os.path.basename(src))[0]
-            log.info("[SuperFor_DirForLoopStart] %d/%d -> %s", idx + 1, total, relative_path)
+            log.info(
+                "[SuperFor_DirForLoopStart] %d/%d -> %s | shape=%s",
+                idx + 1, total, relative_path, tuple(image.shape),
+            )
+            if image.shape[0] != 1:
+                log.warning(
+                    "[SuperFor_DirForLoopStart] 图像 batch=%d（应为 1）。"
+                    "若反复保存，请检查上游是否返回了列表或 cat 增大了 batch。",
+                    image.shape[0],
+                )
 
         graph = GraphBuilder()
         graph.node("easy whileLoopStart", condition=True, initial_value0=i)

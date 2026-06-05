@@ -242,8 +242,8 @@ if _HAS_V3:
 
         @classmethod
         def fingerprint_inputs(cls, directory, mode, index, include_subdir, sort, filter_keyword="") -> Any:
-            """逐张 / 指定序号在循环体内都必须每轮重新执行（序号来自连线时首轮会被冻结）。"""
-            if mode in (MODE_INCREMENTAL, MODE_SINGLE):
+            """逐张模式每次队列前进一张；指定序号按 index 失效缓存（不用 nan，避免整图重复执行）。"""
+            if mode == MODE_INCREMENTAL:
                 return float("nan")
             return f"{_expand_dir(directory)}|{include_subdir}|{sort}|{filter_keyword}|{index}"
 
@@ -498,6 +498,12 @@ if _HAS_V3:
 
                 pil_list = comfy_tensor_to_pil_list(images)
                 batch_n = len(pil_list)
+                if batch_n > 1:
+                    log.warning(
+                        "[SuperFor_SaveImageToDir] 上游图像 batch=%d（通常应为 1）。"
+                        "ComfyUI 若收到列表/大 batch，会对每张各跑一遍后续节点，表现为「重复多次」。",
+                        batch_n,
+                    )
                 saved: list[str] = []
 
                 for i, pil in enumerate(pil_list):
