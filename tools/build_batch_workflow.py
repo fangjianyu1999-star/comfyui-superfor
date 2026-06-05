@@ -249,12 +249,21 @@ def build_dir_loop() -> dict:
         outputs=[out("循环完成", LINK_TYPE_STRING)],
     )
 
+    sink = wf.add(
+        "SuperFor_BatchLoopSink", (1100, 60), (260, 80),
+        title="⑤ 完成出口（必须保留，用于点运行）",
+        widgets=[],
+        inputs=[slot_in("循环结果", LINK_TYPE_STRING)],
+        outputs=[out("完成", LINK_TYPE_STRING)],
+    )
+
     wf.link(start, 0, end, 0, LINK_TYPE_FLOW)          # 循环流程 → 结束
     wf.link(start, 2, i2i, 0, LINK_TYPE_IMAGE)         # 图像 → 修复（直接接开始，勿经加载器）
     wf.link(i2i, 0, saver, 0, LINK_TYPE_IMAGE)          # 修复 → 保存
     wf.link(start, 4, saver, 1, LINK_TYPE_STRING)       # 相对子目录
     wf.link(start, 3, saver, 2, LINK_TYPE_STRING)       # 文件名
     wf.link(saver, 0, end, 1, LINK_TYPE_STRING)          # 已保存路径 → 循环体回接（关键）
+    wf.link(end, 0, sink, 0, LINK_TYPE_STRING)           # 循环完成 → 完成出口（关键）
 
     return wf.dump()
 

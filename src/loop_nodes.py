@@ -265,11 +265,13 @@ class SuperForWhileLoopEnd:
                 upstream[parent_id].append(node_id)
 
     def explore_output_nodes(self, dynprompt, upstream, output_nodes, parent_ids):
-        import nodes as comfy_nodes
-
         for parent_id in upstream:
             display_id = dynprompt.get_display_node_id(parent_id)
             for output_id, link in output_nodes.items():
+                out_node = dynprompt.get_node(output_id)
+                # 完成出口必须在循环体外，不能拉进循环体
+                if out_node.get("class_type") == "SuperFor_BatchLoopSink":
+                    continue
                 nid = link[0]
                 if nid in parent_ids and display_id == nid and output_id not in upstream[parent_id]:
                     if "." in parent_id:
@@ -358,8 +360,36 @@ class SuperForWhileLoopEnd:
         }
 
 
+class BatchLoopSink:
+    """批量循环-完成出口
+
+    必须有一个 OUTPUT 节点才能点「运行」，但不能把 OUTPUT 放在循环结束节点上——
+    ComfyUI 每次循环展开都会把展开子图里的 OUTPUT 节点重新入队，导致同一张重复保存。
+    本节点接在「批量循环-结束」之后，作为唯一队列出口。
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "循环结果": (any_type, {"tooltip": "接「批量循环-结束」的「循环完成」输出"}),
+            },
+        }
+
+    RETURN_TYPES = (any_type,)
+    RETURN_NAMES = ("完成",)
+    FUNCTION = "sink"
+    CATEGORY = "SuperFor/批量"
+    OUTPUT_NODE = True
+
+    def sink(self, **kwargs):
+        result = _pick(kwargs, "循环结果", "loop_result", default="批量处理完成")
+        log.info("[SuperFor_BatchLoopSink] 全部完成")
+        return (result,)
+
+
 class DirForLoopEnd:
-    """SuperFor 批量循环-结束"""
+    """SuperFor 批量循环-结束（不可设 OUTPUT_NODE，见 BatchLoopSink）"""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -388,7 +418,6 @@ class DirForLoopEnd:
     RETURN_NAMES = ("循环完成",)
     FUNCTION = "end"
     CATEGORY = "SuperFor/批量"
-    OUTPUT_NODE = True
 
     def end(self, dynprompt=None, extra_pnginfo=None, unique_id=None, **kwargs):
         flow = _pick(kwargs, "循环流程", "flow", "🔁 循环流程")
@@ -417,11 +446,13 @@ if _HAS_GRAPH:
     NODE_CLASS_MAPPINGS = {
         "SuperFor_DirForLoopStart": DirForLoopStart,
         "SuperFor_DirForLoopEnd": DirForLoopEnd,
+        "SuperFor_BatchLoopSink": BatchLoopSink,
         "SuperFor_WhileLoopEnd": SuperForWhileLoopEnd,
     }
     NODE_DISPLAY_NAME_MAPPINGS = {
         "SuperFor_DirForLoopStart": "批量循环-开始（自动计数）",
         "SuperFor_DirForLoopEnd": "批量循环-结束",
+        "SuperFor_BatchLoopSink": "批量循环-完成出口",
         "SuperFor_WhileLoopEnd": "批量循环-内部结束",
     }
 else:  # pragma: no cover
